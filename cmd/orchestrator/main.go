@@ -149,8 +149,27 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
 
-	logger.Info("shutting down", "signal", sig)
+	activeWS := p.WSCounter().Total()
+	logger.Info("shutting down", "signal", sig, "active_websockets", activeWS)
 	cancel() // stop policy goroutines
+
+	// Calculate drain timeout: use the max drain_timeout across all agents.
+	drainTimeout := 30 * time.Second
+	for _, agent := range cfg.Agents {
+		if agent.Idle.DrainTimeout > drainTimeout {
+			drainTimeout = agent.Idle.DrainTimeout
+		}
+	}
+
+	// Wait for WebSocket connections to drain naturally.
+	if activeWS > 0 {
+		logger.Info("waiting for WebSocket connections to drain", "timeout", drainTimeout, "active", activeWS)
+		if p.WSCounter().Wait(drainTimeout) {
+			logger.Info("all WebSocket connections drained")
+		} else {
+			logger.Warn("drain timeout reached, forcing shutdown", "remaining_websockets", p.WSCounter().Total())
+		}
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
