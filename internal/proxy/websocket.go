@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+const (
+	// wsDeadline is the read/write deadline for WebSocket connections.
+	// Reset on every successful read/write to allow active connections to continue.
+	wsDeadline = 5 * time.Minute
+)
+
 type WSCounter struct {
 	counts sync.Map  // hostname → *int64
 	total  int64     // total across all hostnames
@@ -79,6 +85,22 @@ func (w *WSCounter) Wait(timeout time.Duration) bool {
 	}
 }
 
+// deadlineConn wraps a net.Conn and refreshes read/write deadlines on each operation.
+type deadlineConn struct {
+	net.Conn
+	deadline time.Duration
+}
+
+func (dc *deadlineConn) Read(p []byte) (int, error) {
+	dc.Conn.SetReadDeadline(time.Now().Add(dc.deadline))
+	return dc.Conn.Read(p)
+}
+
+func (dc *deadlineConn) Write(p []byte) (int, error) {
+	dc.Conn.SetWriteDeadline(time.Now().Add(dc.deadline))
+	return dc.Conn.Write(p)
+}
+
 // activityWriter wraps a writer and touches the activity tracker on every write.
 type activityWriter struct {
 	w        io.Writer
@@ -122,7 +144,7 @@ func handleWebSocket(ctx context.Context, w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	backConn, err := net.Dial("tcp", backendAddr)
+	backConn, err := net.DialTimeout("tcp", backendAddr, 10*time.Second)
 	if err != nil {
 		logger.Error("websocket: failed to dial backend", "error", err, "backend", backendAddr)
 		http.Error(w, "bad gateway", http.StatusBadGateway)
@@ -143,8 +165,12 @@ func handleWebSocket(ctx context.Context, w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Wrap connections with deadline enforcement to prevent slow-read/slow-write attacks.
+	dlClient := &deadlineConn{Conn: clientConn, deadline: wsDeadline}
+	dlBackend := &deadlineConn{Conn: backConn, deadline: wsDeadline}
+
 	// Forward the original request to the backend.
-	if err := r.Write(backConn); err != nil {
+	if err := r.Write(dlBackend); err != nil {
 		clientConn.Close()
 		backConn.Close()
 		logger.Error("websocket: failed to write request to backend", "error", err)
@@ -162,8 +188,8 @@ func handleWebSocket(ctx context.Context, w http.ResponseWriter, r *http.Request
 	}()
 
 	// Bidirectional copy with activity tracking on every frame.
-	clientActivity := &activityWriter{w: backConn, hostname: hostname, activity: activity}
-	backendActivity := &activityWriter{w: clientConn, hostname: hostname, activity: activity}
+	clientActivity := &activityWriter{w: dlBackend, hostname: hostname, activity: activity}
+	backendActivity := &activityWriter{w: dlClient, hostname: hostname, activity: activity}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -176,7 +202,7 @@ func handleWebSocket(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 	go func() {
 		defer wg.Done()
-		io.Copy(backendActivity, backConn) //nolint:errcheck
+		io.Copy(backendActivity, dlBackend) //nolint:errcheck
 		clientConn.Close()
 	}()
 

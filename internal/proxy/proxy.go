@@ -53,6 +53,9 @@ func (p *Proxy) Register(hostname, agentName string, target *url.URL, pol policy
 		Policy:    pol,
 	}
 
+	// Reserve this hostname in the registry to prevent hijacking.
+	p.registry.ReserveHostname(hostname)
+
 	p.logger.Info("registered backend", "hostname", hostname, "agent", agentName, "target", target)
 }
 
@@ -67,9 +70,9 @@ func (p *Proxy) WSCounter() *WSCounter {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hostname := stripPort(r.Host)
 
-	// API routes (served on any hostname).
+	// Service API is NOT served on the public port — admin only.
 	if strings.HasPrefix(r.URL.Path, "/api/services") {
-		p.handleServiceAPI(w, r)
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
@@ -150,8 +153,8 @@ func (p *Proxy) serveDynamicService(w http.ResponseWriter, r *http.Request, host
 	rp.ServeHTTP(w, r)
 }
 
-// handleServiceAPI routes /api/services requests.
-func (p *Proxy) handleServiceAPI(w http.ResponseWriter, r *http.Request) {
+// HandleServiceAPI routes /api/services requests. Intended for admin mux only.
+func (p *Proxy) HandleServiceAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch {
@@ -159,6 +162,8 @@ func (p *Proxy) handleServiceAPI(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(p.registry.List())
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/services":
+		// Limit request body to 1MB to prevent memory exhaustion.
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var req struct {
 			Hostname string `json:"hostname"`
 			Target   string `json:"target"`
@@ -172,7 +177,10 @@ func (p *Proxy) handleServiceAPI(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"hostname and target required"}`, http.StatusBadRequest)
 			return
 		}
-		p.registry.Register(req.Hostname, req.Target, req.Agent)
+		if err := p.registry.Register(req.Hostname, req.Target, req.Agent); err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 

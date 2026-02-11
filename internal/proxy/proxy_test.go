@@ -190,7 +190,8 @@ func TestServiceRegistryFallback(t *testing.T) {
 
 	registry := services.NewRegistry(testLogger())
 	p := New(registry, testLogger())
-	registry.Register("dynamic.com", backend.URL, "agent-x")
+	// Register directly (bypassing validation) since test backend is on localhost.
+	registry.RegisterUnsafe("dynamic.com", backend.URL, "agent-x")
 
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Host = "dynamic.com"
@@ -206,22 +207,33 @@ func TestServiceAPIRegisterAndList(t *testing.T) {
 	registry := services.NewRegistry(testLogger())
 	p := New(registry, testLogger())
 
-	// Register via API
+	// Register via admin API handler (no longer on public port)
 	body := strings.NewReader(`{"hostname":"x.com","target":"http://localhost:1234","agent":"a"}`)
 	req := httptest.NewRequest("POST", "/api/services", body)
-	req.Host = "any.com"
 	w := httptest.NewRecorder()
-	p.ServeHTTP(w, req)
+	p.HandleServiceAPI(w, req)
 	if w.Code != 201 {
 		t.Errorf("register status = %d, want 201", w.Code)
 	}
 
-	// List
+	// List via admin API handler
 	req = httptest.NewRequest("GET", "/api/services", nil)
-	req.Host = "any.com"
 	w = httptest.NewRecorder()
-	p.ServeHTTP(w, req)
+	p.HandleServiceAPI(w, req)
 	if w.Code != 200 {
 		t.Errorf("list status = %d, want 200", w.Code)
+	}
+}
+
+func TestServiceAPINotOnPublicPort(t *testing.T) {
+	registry := services.NewRegistry(testLogger())
+	p := New(registry, testLogger())
+
+	req := httptest.NewRequest("GET", "/api/services", nil)
+	req.Host = "any.com"
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("public /api/services status = %d, want 404", w.Code)
 	}
 }

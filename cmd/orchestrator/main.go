@@ -191,6 +191,8 @@ func main() {
 		// Mount metrics on admin handler.
 		adminMux := http.NewServeMux()
 		adminMux.Handle("/metrics", metrics.Handler())
+		adminMux.Handle("/api/services", http.HandlerFunc(p.HandleServiceAPI))
+		adminMux.HandleFunc("/api/services/", p.HandleServiceAPI)
 		adminMux.Handle("/", adminSrv.Handler())
 
 		go func() {
