@@ -11,30 +11,30 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// ServiceManager manages Docker swarm services via scale 0/1.
-type ServiceManager struct {
+// Manager manages Docker swarm services via scale 0/1.
+type Manager struct {
 	docker *client.Client
 	logger *slog.Logger
 }
 
-func NewServiceManager(docker *client.Client, logger *slog.Logger) *ServiceManager {
-	return &ServiceManager{
+func NewManager(docker *client.Client, logger *slog.Logger) *Manager {
+	return &Manager{
 		docker: docker,
 		logger: logger,
 	}
 }
 
-func (m *ServiceManager) Start(ctx context.Context, name string) error {
+func (m *Manager) Start(ctx context.Context, name string) error {
 	m.logger.Info("scaling service to 1", "service", name)
 	return m.scale(ctx, name, 1)
 }
 
-func (m *ServiceManager) Stop(ctx context.Context, name string, _ time.Duration) error {
+func (m *Manager) Stop(ctx context.Context, name string, _ time.Duration) error {
 	m.logger.Info("scaling service to 0", "service", name)
 	return m.scale(ctx, name, 0)
 }
 
-func (m *ServiceManager) Restart(ctx context.Context, name string, _ time.Duration) error {
+func (m *Manager) Restart(ctx context.Context, name string, _ time.Duration) error {
 	m.logger.Info("restarting service", "service", name)
 	if err := m.scale(ctx, name, 0); err != nil {
 		return err
@@ -44,7 +44,7 @@ func (m *ServiceManager) Restart(ctx context.Context, name string, _ time.Durati
 	return m.scale(ctx, name, 1)
 }
 
-func (m *ServiceManager) Status(ctx context.Context, name string) (string, error) {
+func (m *Manager) Status(ctx context.Context, name string) (string, error) {
 	svc, _, err := m.docker.ServiceInspectWithRaw(ctx, name, types.ServiceInspectOptions{})
 	if err != nil {
 		return "", fmt.Errorf("inspect service %q: %w", name, err)
@@ -79,7 +79,7 @@ func (m *ServiceManager) Status(ctx context.Context, name string) (string, error
 	return "starting", nil
 }
 
-func (m *ServiceManager) scale(ctx context.Context, name string, replicas uint64) error {
+func (m *Manager) scale(ctx context.Context, name string, replicas uint64) error {
 	svc, _, err := m.docker.ServiceInspectWithRaw(ctx, name, types.ServiceInspectOptions{})
 	if err != nil {
 		return fmt.Errorf("inspect service %q: %w", name, err)

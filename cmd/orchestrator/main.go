@@ -53,8 +53,7 @@ func main() {
 		logger.Info("container discovery complete", "found", len(discovered))
 	}
 
-	containerMgr := container.NewManager(docker, logger)
-	serviceMgr := container.NewServiceManager(docker, logger)
+	serviceMgr := container.NewManager(docker, logger)
 
 	// Build proxy and policies.
 	p := proxy.New(logger)
@@ -67,12 +66,6 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Pick lifecycle manager based on container mode.
-		var mgr container.Lifecycle = containerMgr
-		if agent.Container.Mode == "service" {
-			mgr = serviceMgr
-		}
-
 		var pol policy.Policy
 		switch agent.Policy {
 		case "always-on":
@@ -83,7 +76,7 @@ func main() {
 				MaxFailures:   agent.Health.MaxFailures,
 			}, logger)
 		case "on-demand":
-			pol = policy.NewOnDemand(mgr, policy.OnDemandConfig{
+			pol = policy.NewOnDemand(serviceMgr, policy.OnDemandConfig{
 				Agent:              name,
 				ContainerName:      agent.Container.Name,
 				HealthURL:          agent.Health.URL,
