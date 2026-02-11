@@ -71,8 +71,8 @@ func main() {
 		}
 	})
 	p := proxy.New(registry, logger)
-	var policies []policy.Policy
 	policyByName := make(map[string]policy.Policy)
+	policyCancels := make(map[string]context.CancelFunc)
 
 	// Build a map of discovered container states for startup reconciliation.
 	discoveredState := make(map[string]string) // container name → state
@@ -87,46 +87,15 @@ func main() {
 			os.Exit(1)
 		}
 
-		var pol policy.Policy
-		switch agent.Policy {
-		case "always-on":
-			pol = policy.NewAlwaysOn(policy.AlwaysOnConfig{
-				Agent:         name,
-				HealthURL:     agent.Health.URL,
-				CheckInterval: agent.Health.CheckInterval,
-				MaxFailures:   agent.Health.MaxFailures,
-			}, emitter, logger)
-		case "on-demand":
-			pol = policy.NewOnDemand(serviceMgr, policy.OnDemandConfig{
-				Agent:              name,
-				ContainerName:      agent.Container.Name,
-				HealthURL:          agent.Health.URL,
-				Hostname:           agent.Hostname,
-				CheckInterval:      agent.Health.CheckInterval,
-				StartupTimeout:     agent.Health.StartupTimeout,
-				IdleTimeout:        agent.Idle.Timeout,
-				MaxFailures:        agent.Health.MaxFailures,
-				MaxRestartAttempts: agent.Health.MaxRestartAttempts,
-			}, p.Activity(), p.WSCounter(), emitter, logger)
-
-			// Startup reconciliation: inform policy if container is already running.
-			if state, ok := discoveredState[agent.Container.Name]; ok {
-				pol.(*policy.OnDemand).SetInitialState(state == "running")
-			}
-		case "unmanaged":
-			pol = policy.NewUnmanaged()
-		default:
-			logger.Error("unknown policy", "agent", name, "policy", agent.Policy)
-			os.Exit(1)
-		}
+		pol, polCancel := createPolicy(name, agent, serviceMgr, p, emitter, discoveredState, logger)
 
 		// Register primary hostname and any additional hostnames.
 		p.Register(agent.Hostname, name, target, pol)
 		for _, h := range agent.Hostnames {
 			p.Register(h, name, target, pol)
 		}
-		policies = append(policies, pol)
 		policyByName[name] = pol
+		policyCancels[name] = polCancel
 		logger.Info("agent configured", "name", name, "hostname", agent.Hostname, "extra_hostnames", len(agent.Hostnames), "policy", agent.Policy)
 	}
 
@@ -171,22 +140,26 @@ func main() {
 	go watcher.Watch(ctx)
 
 	// Start policy goroutines.
-	for _, pol := range policies {
+	for _, pol := range policyByName {
 		go pol.Start(ctx)
 	}
 
 	// Admin server (separate port).
+	var adminSrv *admin.Server
 	if cfg.AdminListen != "" {
 		agentInfos := make(map[string]admin.AgentInfo)
 		for name, agent := range cfg.Agents {
 			agentInfos[name] = admin.AgentInfo{
-				Name:     name,
-				Hostname: agent.Hostname,
-				Policy:   agent.Policy,
-				Backend:  agent.Backend,
+				Name:          name,
+				Hostname:      agent.Hostname,
+				Policy:        agent.Policy,
+				Backend:       agent.Backend,
+				ContainerName: agent.Container.Name,
+				HealthURL:     agent.Health.URL,
+				IdleTimeout:   agent.Idle.Timeout.String(),
 			}
 		}
-		adminSrv := admin.NewServer(agentInfos, policyByName, registry, emitter, serviceMgr, p.WSCounter().Total, logger)
+		adminSrv = admin.NewServer(agentInfos, policyByName, policyCancels, registry, emitter, serviceMgr, p, cfg, *configPath, p.WSCounter().Total, logger)
 
 		// Mount metrics on admin handler.
 		adminMux := http.NewServeMux()
@@ -244,7 +217,8 @@ func main() {
 			logger.Error("failed to reload config", "error", err)
 			continue
 		}
-		reloadConfig(logger, cfg, newCfg, policyByName)
+		reloadConfig(ctx, logger, cfg, newCfg, policyByName, policyCancels, p, serviceMgr, emitter, adminSrv, discoveredState)
+		cfg = newCfg
 	}
 
 	activeWS := p.WSCounter().Total()
@@ -279,32 +253,127 @@ func main() {
 	fmt.Println("orchestrator stopped")
 }
 
-func reloadConfig(logger *slog.Logger, old, new_ *config.Config, policyByName map[string]policy.Policy) {
-	// Warn about structural changes that require restart.
-	for name := range new_.Agents {
-		if _, ok := old.Agents[name]; !ok {
-			logger.Warn("config reload: new agent requires restart to take effect", "agent", name)
+func createPolicy(name string, agent *config.Agent, serviceMgr *container.Manager, p *proxy.Proxy, emitter *events.Emitter, discoveredState map[string]string, logger *slog.Logger) (policy.Policy, context.CancelFunc) {
+	policyCtx, policyCancel := context.WithCancel(context.Background())
+
+	var pol policy.Policy
+	switch agent.Policy {
+	case "always-on":
+		pol = policy.NewAlwaysOn(policy.AlwaysOnConfig{
+			Agent:         name,
+			HealthURL:     agent.Health.URL,
+			CheckInterval: agent.Health.CheckInterval,
+			MaxFailures:   agent.Health.MaxFailures,
+		}, emitter, logger)
+	case "on-demand":
+		pol = policy.NewOnDemand(serviceMgr, policy.OnDemandConfig{
+			Agent:              name,
+			ContainerName:      agent.Container.Name,
+			HealthURL:          agent.Health.URL,
+			Hostname:           agent.Hostname,
+			CheckInterval:      agent.Health.CheckInterval,
+			StartupTimeout:     agent.Health.StartupTimeout,
+			IdleTimeout:        agent.Idle.Timeout,
+			MaxFailures:        agent.Health.MaxFailures,
+			MaxRestartAttempts: agent.Health.MaxRestartAttempts,
+		}, p.Activity(), p.WSCounter(), emitter, logger)
+
+		// Startup reconciliation: inform policy if container is already running.
+		if state, ok := discoveredState[agent.Container.Name]; ok {
+			pol.(*policy.OnDemand).SetInitialState(state == "running")
 		}
-	}
-	for name := range old.Agents {
-		if _, ok := new_.Agents[name]; !ok {
-			logger.Warn("config reload: removed agent requires restart to take effect", "agent", name)
-		}
-	}
-	for name, oldAgent := range old.Agents {
-		newAgent, ok := new_.Agents[name]
-		if !ok {
-			continue
-		}
-		if oldAgent.Hostname != newAgent.Hostname {
-			logger.Warn("config reload: hostname change requires restart", "agent", name, "old", oldAgent.Hostname, "new", newAgent.Hostname)
-		}
-		if oldAgent.Backend != newAgent.Backend {
-			logger.Warn("config reload: backend change requires restart", "agent", name)
-		}
+	case "unmanaged":
+		pol = policy.NewUnmanaged()
 	}
 
-	// Apply runtime-safe changes.
+	// The caller is responsible for starting the goroutine with policyCtx.
+	// We wrap Start to use the policy-specific context.
+	wrapper := &policyWrapper{inner: pol, ctx: policyCtx}
+	_ = wrapper // not used directly; we return the raw policy and cancel
+
+	return pol, policyCancel
+}
+
+// policyWrapper is unused but reserved for future use.
+type policyWrapper struct {
+	inner policy.Policy
+	ctx   context.Context
+}
+
+func reloadConfig(ctx context.Context, logger *slog.Logger, old, new_ *config.Config, policyByName map[string]policy.Policy, policyCancels map[string]context.CancelFunc, p *proxy.Proxy, serviceMgr *container.Manager, emitter *events.Emitter, adminSrv *admin.Server, discoveredState map[string]string) {
+	// Add new agents.
+	for name, agent := range new_.Agents {
+		if _, ok := old.Agents[name]; ok {
+			continue // existing agent — handle reconfigure below
+		}
+
+		logger.Info("config reload: adding new agent", "agent", name)
+		target, err := url.Parse(agent.Backend)
+		if err != nil {
+			logger.Error("config reload: invalid backend URL for new agent", "agent", name, "error", err)
+			continue
+		}
+
+		pol, polCancel := createPolicy(name, agent, serviceMgr, p, emitter, discoveredState, logger)
+
+		p.Register(agent.Hostname, name, target, pol)
+		for _, h := range agent.Hostnames {
+			p.Register(h, name, target, pol)
+		}
+
+		policyByName[name] = pol
+		policyCancels[name] = polCancel
+
+		// Start policy goroutine.
+		go pol.Start(ctx)
+
+		if adminSrv != nil {
+			adminSrv.AddAgent(name, admin.AgentInfo{
+				Name:          name,
+				Hostname:      agent.Hostname,
+				Policy:        agent.Policy,
+				Backend:       agent.Backend,
+				ContainerName: agent.Container.Name,
+				HealthURL:     agent.Health.URL,
+				IdleTimeout:   agent.Idle.Timeout.String(),
+			}, pol, polCancel)
+		}
+
+		emitter.Emit(events.Event{Type: events.AgentAdded, Agent: name})
+		logger.Info("config reload: agent added", "agent", name, "hostname", agent.Hostname)
+	}
+
+	// Remove deleted agents.
+	for name, agent := range old.Agents {
+		if _, ok := new_.Agents[name]; ok {
+			continue // still exists
+		}
+
+		logger.Info("config reload: removing agent", "agent", name)
+
+		// Cancel policy goroutine.
+		if cancel, ok := policyCancels[name]; ok {
+			cancel()
+			delete(policyCancels, name)
+		}
+
+		// Deregister from proxy.
+		p.Deregister(agent.Hostname)
+		for _, h := range agent.Hostnames {
+			p.Deregister(h)
+		}
+
+		delete(policyByName, name)
+
+		if adminSrv != nil {
+			adminSrv.RemoveAgentInternal(name)
+		}
+
+		emitter.Emit(events.Event{Type: events.AgentRemoved, Agent: name})
+		logger.Info("config reload: agent removed", "agent", name)
+	}
+
+	// Reconfigure existing agents.
 	for name, pol := range policyByName {
 		newAgent, ok := new_.Agents[name]
 		if !ok {

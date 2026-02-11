@@ -59,6 +59,17 @@ func (p *Proxy) Register(hostname, agentName string, target *url.URL, pol policy
 	p.logger.Info("registered backend", "hostname", hostname, "agent", agentName, "target", target)
 }
 
+// Deregister removes a backend by hostname.
+func (p *Proxy) Deregister(hostname string) {
+	delete(p.backends, hostname)
+	p.logger.Info("deregistered backend", "hostname", hostname)
+}
+
+// Backends returns the backends map (for inspection by admin).
+func (p *Proxy) Backends() map[string]*Backend {
+	return p.backends
+}
+
 func (p *Proxy) Activity() *ActivityTracker {
 	return p.activity
 }

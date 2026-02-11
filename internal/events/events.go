@@ -15,6 +15,8 @@ const (
 	AgentStarting     = "agent.starting"
 	AgentHealthFailed = "agent.health_failed"
 	RestartExhausted  = "restart.exhausted"
+	AgentAdded        = "agent.added"
+	AgentRemoved      = "agent.removed"
 )
 
 // Event represents a lifecycle event for an agent.
@@ -59,13 +61,26 @@ func (e *Emitter) Emit(ev Event) {
 	e.mu.RUnlock()
 
 	for _, fn := range handlers {
-		fn(ev)
+		if fn != nil {
+			fn(ev)
+		}
 	}
 }
 
 // OnEvent registers a handler to be called for every emitted event.
-func (e *Emitter) OnEvent(fn func(Event)) {
+// Returns an ID that can be used with RemoveHandler.
+func (e *Emitter) OnEvent(fn func(Event)) int {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.handlers = append(e.handlers, fn)
-	e.mu.Unlock()
+	return len(e.handlers) - 1
+}
+
+// RemoveHandler removes a handler by its ID.
+func (e *Emitter) RemoveHandler(id int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if id >= 0 && id < len(e.handlers) {
+		e.handlers[id] = nil
+	}
 }

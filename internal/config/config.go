@@ -54,6 +54,15 @@ type Health struct {
 	MaxRestartAttempts int           `yaml:"max_restart_attempts"`
 }
 
+// Save writes the config back to the given file path.
+func Save(cfg *Config, path string) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
