@@ -119,7 +119,7 @@ func (p *Proxy) handleHealth(w http.ResponseWriter, b *Backend) {
 	w.Header().Set("Cache-Control", "no-cache")
 
 	status := http.StatusOK
-	if state != "running" && state != "ready" {
+	if state != "ready" {
 		status = http.StatusServiceUnavailable
 	}
 

@@ -93,6 +93,10 @@ func (o *OnDemand) Start(ctx context.Context) {
 			o.waitForReady(ctx)
 		case "ready":
 			o.waitForIdle(ctx)
+		case "degraded":
+			// Stay degraded until context cancelled; Swarm handles recovery.
+			<-ctx.Done()
+			return
 		}
 	}
 }
@@ -193,12 +197,11 @@ func (o *OnDemand) waitForIdle(ctx context.Context) {
 				if failures >= o.maxFailures {
 					o.logger.Warn("max failures reached, attempting restart")
 					if o.attemptRestart(ctx) {
-						// Restart succeeded — go back to starting to re-verify health.
 						o.setState("starting")
 						return
 					}
-					// Restart failed — go to sleeping.
-					o.setState("sleeping")
+					// All restart attempts exhausted.
+					o.setState("degraded")
 					return
 				}
 			} else {

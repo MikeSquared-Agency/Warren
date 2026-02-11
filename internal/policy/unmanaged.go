@@ -13,7 +13,7 @@ func (u *Unmanaged) Start(ctx context.Context) {
 }
 
 func (u *Unmanaged) State() string {
-	return "running"
+	return "ready"
 }
 
 func (u *Unmanaged) OnRequest() {}

@@ -7,7 +7,7 @@ type Policy interface {
 	// It blocks until ctx is cancelled.
 	Start(ctx context.Context)
 
-	// State returns the current agent state: "running", "stopped", "unhealthy", "degraded", "starting".
+	// State returns the current agent state: "sleeping", "starting", "ready", "degraded".
 	State() string
 
 	// OnRequest is called by the proxy before forwarding a request.
