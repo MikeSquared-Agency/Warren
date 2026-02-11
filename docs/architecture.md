@@ -408,6 +408,56 @@ stateDiagram-v2
     running --> running : always running, no management
 ```
 
+## CLI Architecture
+
+Warren produces two binaries:
+
+- **`warren-server`** — the orchestrator (reverse proxy, lifecycle management, event system, metrics)
+- **`warren`** — the CLI client for managing the orchestrator
+
+### How the CLI Works
+
+The CLI is a thin HTTP client that talks to the admin API. It has no direct access to Docker, Swarm, or the config file (except for `reload`, `deploy`, `agent logs`, and `secrets set` which shell out to local commands).
+
+```mermaid
+flowchart LR
+    CLI["warren CLI"] -->|"HTTP GET/POST/DELETE"| ADM["Admin API :9090"]
+    CLI -->|"SSE stream"| EVT["/admin/events"]
+    CLI -->|"shell out"| DOCKER["docker CLI"]
+    CLI -->|"shell out"| PGREP["pgrep + kill"]
+    
+    ADM --> ORC["Orchestrator"]
+    EVT --> ORC
+```
+
+**API-backed commands** (agent list/add/remove/inspect/wake/sleep, service list/add/remove, status, events):
+- Pure HTTP calls to the admin API
+- No local Docker access required
+- Can manage remote orchestrators via `--admin`
+
+**Local commands** (reload, deploy, agent logs, secrets set):
+- Shell out to `docker`, `pgrep`, or `kill`
+- Must run on the same host as the orchestrator or Docker daemon
+
+**Offline commands** (init, scaffold, config validate):
+- No API or Docker access needed
+- Generate files or validate config locally
+
+### Event Streaming
+
+`warren events` uses Server-Sent Events (SSE) via `GET /admin/events`. The CLI opens a long-lived HTTP connection and prints each `data:` line as it arrives. This provides real-time visibility into agent state transitions without polling.
+
+### Config Resolution Order
+
+The CLI resolves the admin API URL through a fallback chain:
+
+1. `--admin` flag (highest priority)
+2. `WARREN_ADMIN` environment variable
+3. `~/.warren/config.yaml` → `admin` field
+4. Default: `http://localhost:9090`
+
+This allows flexible usage — local development uses the default, CI/CD uses env vars, and remote management uses the flag or config file.
+
 ## Design Decisions
 
 ### Why Swarm and Not Kubernetes?

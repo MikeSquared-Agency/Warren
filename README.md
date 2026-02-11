@@ -266,10 +266,123 @@ One rule. Never needs changing again.
 # Reload config without downtime
 sudo systemctl reload warren-orchestrator
 # or
-kill -SIGHUP $(pidof orchestrator)
+warren reload
 ```
 
 Runtime-safe changes (idle timeouts, health intervals, failure thresholds) apply immediately. Structural changes (new agents, hostname changes) require a restart.
+
+> **Tip:** You can also use the `warren` CLI instead of editing config files manually. See the [CLI](#cli) section below.
+
+## CLI
+
+Warren ships two binaries: `warren-server` (the orchestrator) and `warren` (the CLI). The CLI talks to the admin API over HTTP, so you can manage agents, services, and deployments without editing YAML or curling endpoints.
+
+### Installation
+
+```bash
+make build
+# Produces bin/warren-server and bin/warren
+```
+
+### Configuration
+
+The CLI resolves the admin API URL in order:
+
+1. `--admin` flag — `warren --admin http://host:9090 status`
+2. `WARREN_ADMIN` env var
+3. `~/.warren/config.yaml` (`admin: "http://host:9090"`)
+4. Default: `http://localhost:9090`
+
+### Global Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--admin` | `http://localhost:9090` | Admin API URL |
+| `--format` | `table` | Output format: `table` or `json` |
+
+### Agent Management
+
+```bash
+# List all agents
+warren agent list
+```
+```
+NAME          HOSTNAME                   POLICY     STATE    CONNECTIONS
+friend        friend.yourdomain.com      always-on  ready    2
+dutybound     kai.yourdomain.com         on-demand  sleeping 0
+root          root.yourdomain.com        unmanaged  ready    1
+```
+
+```bash
+# Add an agent dynamically (zero downtime, no disconnections)
+warren agent add --name my-agent --hostname agent.example.com \
+  --policy on-demand --idle-timeout 30m
+
+# Or interactively
+warren agent add
+
+# Inspect, wake, sleep, remove
+warren agent inspect dutybound
+warren agent wake dutybound
+warren agent sleep dutybound
+warren agent remove dutybound
+
+# Tail logs
+warren agent logs dutybound
+```
+
+Dynamic agent creation via `agent add` happens at runtime — no restart needed, no existing connections disrupted.
+
+### Service Management
+
+```bash
+warren service list
+warren service add --hostname preview.example.com --target http://tasks.openclaw_dev:3000 --agent dev
+warren service remove preview.example.com
+```
+
+### Operations
+
+```bash
+# Orchestrator status
+warren status
+```
+```
+Warren Orchestrator
+  Uptime:      3d 14h 22m
+  Agents:      5 (3 ready, 2 sleeping)
+  Connections: 4 active WebSocket
+  Services:    2 dynamic routes
+```
+
+```bash
+# Hot-reload config
+warren reload
+
+# Stream real-time events (SSE)
+warren events
+
+# Validate config file
+warren config validate orchestrator.yaml
+```
+
+### Scaffolding & Deployment
+
+```bash
+# Generate template configs
+warren init
+
+# Scaffold a new agent directory
+warren scaffold my-agent
+
+# Deploy stack
+warren deploy --file stack.yaml --name openclaw
+
+# Create Docker secrets
+warren secrets set agent-api-key
+```
+
+For the full CLI reference with all flags and examples, see [docs/cli.md](docs/cli.md).
 
 ## Configuration Reference
 
@@ -368,6 +481,7 @@ The test suite covers all packages with unit tests and integration tests for the
 ## Docs
 
 - [Architecture](docs/architecture.md) — detailed design, event system, metrics pipeline, LRU eviction
+- [CLI Reference](docs/cli.md) — complete command reference with examples
 - [Containerising Agents](docs/containerising-agents.md) — how to package OpenClaw agents as Docker images
 
 ## License
