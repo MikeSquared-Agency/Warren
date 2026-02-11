@@ -70,6 +70,12 @@ func main() {
 	p := proxy.New(registry, logger)
 	var policies []policy.Policy
 
+	// Build a map of discovered container states for startup reconciliation.
+	discoveredState := make(map[string]string) // container name → state
+	for _, dc := range discovered {
+		discoveredState[dc.Name] = dc.State
+	}
+
 	for name, agent := range cfg.Agents {
 		target, err := url.Parse(agent.Backend)
 		if err != nil {
@@ -98,6 +104,11 @@ func main() {
 				MaxFailures:        agent.Health.MaxFailures,
 				MaxRestartAttempts: agent.Health.MaxRestartAttempts,
 			}, p.Activity(), p.WSCounter(), emitter, logger)
+
+			// Startup reconciliation: inform policy if container is already running.
+			if state, ok := discoveredState[agent.Container.Name]; ok {
+				pol.(*policy.OnDemand).SetInitialState(state == "running")
+			}
 		case "unmanaged":
 			pol = policy.NewUnmanaged()
 		default:
