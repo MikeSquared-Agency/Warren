@@ -69,6 +69,7 @@ func main() {
 	})
 	p := proxy.New(registry, logger)
 	var policies []policy.Policy
+	policyByName := make(map[string]policy.Policy)
 
 	// Build a map of discovered container states for startup reconciliation.
 	discoveredState := make(map[string]string) // container name → state
@@ -122,6 +123,7 @@ func main() {
 			p.Register(h, name, target, pol)
 		}
 		policies = append(policies, pol)
+		policyByName[name] = pol
 		logger.Info("agent configured", "name", name, "hostname", agent.Hostname, "extra_hostnames", len(agent.Hostnames), "policy", agent.Policy)
 	}
 
@@ -148,10 +150,24 @@ func main() {
 		}
 	}()
 
-	// Wait for shutdown signal.
+	// Wait for shutdown signal or SIGHUP for reload.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-sigCh
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+
+	var sig os.Signal
+	for {
+		sig = <-sigCh
+		if sig != syscall.SIGHUP {
+			break
+		}
+		logger.Info("SIGHUP received, reloading config")
+		newCfg, err := config.Load(*configPath)
+		if err != nil {
+			logger.Error("failed to reload config", "error", err)
+			continue
+		}
+		reloadConfig(logger, cfg, newCfg, policyByName)
+	}
 
 	activeWS := p.WSCounter().Total()
 	logger.Info("shutting down", "signal", sig, "active_websockets", activeWS)
@@ -183,4 +199,45 @@ func main() {
 	}
 
 	fmt.Println("orchestrator stopped")
+}
+
+func reloadConfig(logger *slog.Logger, old, new_ *config.Config, policyByName map[string]policy.Policy) {
+	// Warn about structural changes that require restart.
+	for name := range new_.Agents {
+		if _, ok := old.Agents[name]; !ok {
+			logger.Warn("config reload: new agent requires restart to take effect", "agent", name)
+		}
+	}
+	for name := range old.Agents {
+		if _, ok := new_.Agents[name]; !ok {
+			logger.Warn("config reload: removed agent requires restart to take effect", "agent", name)
+		}
+	}
+	for name, oldAgent := range old.Agents {
+		newAgent, ok := new_.Agents[name]
+		if !ok {
+			continue
+		}
+		if oldAgent.Hostname != newAgent.Hostname {
+			logger.Warn("config reload: hostname change requires restart", "agent", name, "old", oldAgent.Hostname, "new", newAgent.Hostname)
+		}
+		if oldAgent.Backend != newAgent.Backend {
+			logger.Warn("config reload: backend change requires restart", "agent", name)
+		}
+	}
+
+	// Apply runtime-safe changes.
+	for name, pol := range policyByName {
+		newAgent, ok := new_.Agents[name]
+		if !ok {
+			continue
+		}
+		switch p := pol.(type) {
+		case *policy.OnDemand:
+			p.Reconfigure(newAgent.Idle.Timeout, newAgent.Health.CheckInterval, newAgent.Health.MaxFailures, newAgent.Health.MaxRestartAttempts)
+		case *policy.AlwaysOn:
+			p.Reconfigure(newAgent.Health.CheckInterval, newAgent.Health.MaxFailures)
+		}
+	}
+	logger.Info("config reload complete")
 }
