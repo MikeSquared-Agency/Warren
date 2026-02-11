@@ -53,7 +53,8 @@ func main() {
 		logger.Info("container discovery complete", "found", len(discovered))
 	}
 
-	mgr := container.NewManager(docker, logger)
+	containerMgr := container.NewManager(docker, logger)
+	serviceMgr := container.NewServiceManager(docker, logger)
 
 	// Build proxy and policies.
 	p := proxy.New(logger)
@@ -64,6 +65,12 @@ func main() {
 		if err != nil {
 			logger.Error("invalid backend URL", "agent", name, "error", err)
 			os.Exit(1)
+		}
+
+		// Pick lifecycle manager based on container mode.
+		var mgr container.Lifecycle = containerMgr
+		if agent.Container.Mode == "service" {
+			mgr = serviceMgr
 		}
 
 		var pol policy.Policy

@@ -11,7 +11,7 @@ import (
 
 type AlwaysOn struct {
 	agent     string
-	manager   *container.Manager
+	manager   container.Lifecycle
 	name      string // container name
 	healthURL string
 
@@ -37,7 +37,7 @@ type AlwaysOnConfig struct {
 	MaxRestartAttempts int
 }
 
-func NewAlwaysOn(manager *container.Manager, cfg AlwaysOnConfig, logger *slog.Logger) *AlwaysOn {
+func NewAlwaysOn(manager container.Lifecycle, cfg AlwaysOnConfig, logger *slog.Logger) *AlwaysOn {
 	return &AlwaysOn{
 		agent:              cfg.Agent,
 		manager:            manager,

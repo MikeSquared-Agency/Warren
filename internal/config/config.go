@@ -32,6 +32,7 @@ type IdleConfig struct {
 
 type Container struct {
 	Name   string            `yaml:"name"`
+	Mode   string            `yaml:"mode"` // "container" (default) or "service" (swarm)
 	Labels map[string]string `yaml:"labels"`
 }
 

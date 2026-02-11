@@ -1,0 +1,100 @@
+{
+  "auth": {
+    "profiles": {
+      "anthropic:default": {
+        "provider": "anthropic",
+        "mode": "token"
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "/home/dutybound/.openclaw/workspace",
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "workspace": "/home/dutybound/.openclaw/workspace",
+        "subagents": {
+          "allowAgents": [
+            "developer",
+            "researcher",
+            "reviewer",
+            "security",
+            "tester"
+          ]
+        },
+        "tools": {
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch"
+          ]
+        }
+      },
+      {
+        "id": "developer",
+        "workspace": "/home/dutybound/.openclaw/workspace",
+        "tools": {}
+      },
+      {
+        "id": "tester",
+        "workspace": "/home/dutybound/.openclaw/workspace",
+        "tools": {}
+      },
+      {
+        "id": "researcher",
+        "workspace": "/home/dutybound/.openclaw/workspace",
+        "tools": {
+          "deny": [
+            "edit",
+            "apply_patch"
+          ]
+        }
+      },
+      {
+        "id": "reviewer",
+        "workspace": "/home/dutybound/.openclaw/workspace",
+        "tools": {
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch"
+          ]
+        }
+      },
+      {
+        "id": "security",
+        "workspace": "/home/dutybound/.openclaw/workspace",
+        "tools": {
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch"
+          ]
+        }
+      }
+    ]
+  },
+  "gateway": {
+    "port": 18800,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token"
+    }
+  },
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    }
+  }
+}

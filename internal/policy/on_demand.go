@@ -37,7 +37,7 @@ type OnDemand struct {
 	startupTimeout, idleTimeout, checkInterval time.Duration
 	maxFailures, maxRestartAttempts             int
 
-	manager  *container.Manager
+	manager  container.Lifecycle
 	activity ActivitySource
 	ws       WSSource
 
@@ -48,7 +48,7 @@ type OnDemand struct {
 	logger *slog.Logger
 }
 
-func NewOnDemand(mgr *container.Manager, cfg OnDemandConfig, activity ActivitySource, ws WSSource, logger *slog.Logger) *OnDemand {
+func NewOnDemand(mgr container.Lifecycle, cfg OnDemandConfig, activity ActivitySource, ws WSSource, logger *slog.Logger) *OnDemand {
 	return &OnDemand{
 		agent:              cfg.Agent,
 		containerName:      cfg.ContainerName,
