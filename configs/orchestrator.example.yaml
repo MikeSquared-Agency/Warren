@@ -1,0 +1,24 @@
+listen: ":8080"
+
+defaults:
+  health_check_interval: 30s
+
+agents:
+  root:
+    hostname: "kai.darlington.dev"
+    backend: "http://localhost:18789"
+    policy: unmanaged
+
+  friend:
+    hostname: "friend.darlington.dev"
+    backend: "http://localhost:18790"
+    policy: always-on
+    container:
+      name: "openclaw-friend"
+      labels:
+        orchestrator.agent: friend
+    health:
+      url: "http://localhost:18790"
+      check_interval: 30s
+      max_failures: 3
+      max_restart_attempts: 10
