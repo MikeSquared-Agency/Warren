@@ -2,7 +2,7 @@
 
 ## Overview
 
-OpenClaw Orchestrator sits between a Cloudflare Tunnel (or any reverse proxy) and a Docker Swarm cluster. It routes HTTP and WebSocket traffic by hostname, manages agent lifecycle through configurable policies, and tracks activity to automatically sleep idle agents.
+Warren sits between a Cloudflare Tunnel (or any reverse proxy) and a Docker Swarm cluster. It routes HTTP and WebSocket traffic by hostname, manages agent lifecycle through configurable policies, and tracks activity to automatically sleep idle agents.
 
 ```mermaid
 flowchart TB

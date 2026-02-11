@@ -1,4 +1,4 @@
-# OpenClaw Orchestrator
+# Warren
 
 A reverse proxy that manages [OpenClaw](https://openclaw.ai) agents running in Docker. Point your Cloudflare Tunnel at it, configure your agents in YAML, and it handles routing, lifecycle, health monitoring, and on-demand wake/sleep — so agents that aren't in use consume zero resources.
 
@@ -6,7 +6,7 @@ A reverse proxy that manages [OpenClaw](https://openclaw.ai) agents running in D
 
 Running multiple OpenClaw agents on one server is a pain. You're manually managing containers, docker-compose files, port allocations, health monitoring, and tunnel config. Each new agent means touching multiple files. Agents that aren't used 24/7 still burn CPU and RAM because there's no way to automatically sleep and wake them.
 
-OpenClaw Orchestrator fixes this with a single Go binary and two YAML files.
+Warren fixes this with a single Go binary and two YAML files.
 
 ## What It Does
 
@@ -214,7 +214,7 @@ One rule. Never needs changing again.
 ## Project Structure
 
 ```
-openclaw-orchestrator/
+warren/
 ├── cmd/orchestrator/          # entry point
 ├── internal/
 │   ├── config/                # YAML config + validation
