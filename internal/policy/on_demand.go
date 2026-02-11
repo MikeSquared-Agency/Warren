@@ -2,11 +2,13 @@ package policy
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"warren/internal/container"
+	"warren/internal/events"
 )
 
 // ActivitySource provides last-activity timestamps per hostname.
@@ -40,15 +42,17 @@ type OnDemand struct {
 	manager  container.Lifecycle
 	activity ActivitySource
 	ws       WSSource
+	emitter  *events.Emitter
 
-	mu     sync.RWMutex
-	state  string        // "sleeping", "starting", "ready"
-	wakeCh chan struct{} // buffered(1), signals wake request
+	mu           sync.RWMutex
+	state        string        // "sleeping", "starting", "ready", "degraded"
+	initialState *bool         // set by SetInitialState before Start
+	wakeCh       chan struct{} // buffered(1), signals wake request
 
 	logger *slog.Logger
 }
 
-func NewOnDemand(mgr container.Lifecycle, cfg OnDemandConfig, activity ActivitySource, ws WSSource, logger *slog.Logger) *OnDemand {
+func NewOnDemand(mgr container.Lifecycle, cfg OnDemandConfig, activity ActivitySource, ws WSSource, emitter *events.Emitter, logger *slog.Logger) *OnDemand {
 	return &OnDemand{
 		agent:              cfg.Agent,
 		containerName:      cfg.ContainerName,
@@ -62,24 +66,48 @@ func NewOnDemand(mgr container.Lifecycle, cfg OnDemandConfig, activity ActivityS
 		manager:            mgr,
 		activity:           activity,
 		ws:                 ws,
+		emitter:            emitter,
 		state:              "sleeping", // will be resolved in Start
 		wakeCh:             make(chan struct{}, 1),
 		logger:             logger.With("agent", cfg.Agent, "policy", "on-demand"),
 	}
 }
 
+// SetInitialState informs the policy whether the container is already running
+// before Start() is called. This is used for startup reconciliation.
+func (o *OnDemand) SetInitialState(containerRunning bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.initialState = &containerRunning
+}
+
 func (o *OnDemand) Start(ctx context.Context) {
-	// Determine initial state from container status.
-	status, err := o.manager.Status(ctx, o.containerName)
-	if err != nil {
-		o.logger.Warn("failed to inspect container on startup, assuming sleeping", "error", err)
-		o.setState("sleeping")
-	} else if status == "running" {
-		o.logger.Info("container already running on startup, verifying health")
-		o.setState("starting")
+	// Determine initial state: prefer SetInitialState if called, otherwise inspect.
+	o.mu.RLock()
+	preset := o.initialState
+	o.mu.RUnlock()
+
+	if preset != nil {
+		if *preset {
+			o.logger.Info("container reported running at startup, verifying health")
+			o.setState("starting")
+		} else {
+			o.logger.Info("container not running at startup")
+			o.setState("sleeping")
+		}
 	} else {
-		o.logger.Info("container not running on startup", "status", status)
-		o.setState("sleeping")
+		// Fallback: inspect container status directly.
+		status, err := o.manager.Status(ctx, o.containerName)
+		if err != nil {
+			o.logger.Warn("failed to inspect container on startup, assuming sleeping", "error", err)
+			o.setState("sleeping")
+		} else if status == "running" {
+			o.logger.Info("container already running on startup, verifying health")
+			o.setState("starting")
+		} else {
+			o.logger.Info("container not running on startup", "status", status)
+			o.setState("sleeping")
+		}
 	}
 
 	for {
@@ -118,11 +146,24 @@ func (o *OnDemand) OnRequest() {
 
 func (o *OnDemand) setState(s string) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.state != s {
-		o.logger.Info("state transition", "from", o.state, "to", s)
-	}
+	prev := o.state
 	o.state = s
+	o.mu.Unlock()
+
+	if prev != s {
+		o.logger.Info("state transition", "from", prev, "to", s)
+		// Emit corresponding event.
+		switch s {
+		case "sleeping":
+			o.emitter.Emit(events.Event{Type: events.AgentSleep, Agent: o.agent})
+		case "starting":
+			o.emitter.Emit(events.Event{Type: events.AgentStarting, Agent: o.agent})
+		case "ready":
+			o.emitter.Emit(events.Event{Type: events.AgentReady, Agent: o.agent})
+		case "degraded":
+			o.emitter.Emit(events.Event{Type: events.AgentDegraded, Agent: o.agent})
+		}
+	}
 }
 
 // waitForWake blocks until a wake signal arrives, then starts the container.
@@ -133,6 +174,7 @@ func (o *OnDemand) waitForWake(ctx context.Context) {
 		return
 	case <-o.wakeCh:
 		o.logger.Info("wake signal received, starting container")
+		o.emitter.Emit(events.Event{Type: events.AgentWake, Agent: o.agent})
 	}
 
 	if err := o.manager.Start(ctx, o.containerName); err != nil {
@@ -193,6 +235,14 @@ func (o *OnDemand) waitForIdle(ctx context.Context) {
 			if err := container.CheckHealth(ctx, o.healthURL); err != nil {
 				failures++
 				o.logger.Warn("health check failed while ready", "error", err, "consecutive_failures", failures)
+				o.emitter.Emit(events.Event{
+					Type:  events.AgentHealthFailed,
+					Agent: o.agent,
+					Fields: map[string]string{
+						"error":    err.Error(),
+						"failures": fmt.Sprintf("%d", failures),
+					},
+				})
 
 				if failures >= o.maxFailures {
 					o.logger.Warn("max failures reached, attempting restart")
@@ -201,6 +251,7 @@ func (o *OnDemand) waitForIdle(ctx context.Context) {
 						return
 					}
 					// All restart attempts exhausted.
+					o.emitter.Emit(events.Event{Type: events.RestartExhausted, Agent: o.agent})
 					o.setState("degraded")
 					return
 				}

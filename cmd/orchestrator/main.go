@@ -16,6 +16,7 @@ import (
 
 	"warren/internal/config"
 	"warren/internal/container"
+	"warren/internal/events"
 	"warren/internal/policy"
 	"warren/internal/proxy"
 )
@@ -54,6 +55,7 @@ func main() {
 	}
 
 	serviceMgr := container.NewManager(docker, logger)
+	emitter := events.NewEmitter(logger)
 
 	// Build proxy and policies.
 	p := proxy.New(logger)
@@ -74,7 +76,7 @@ func main() {
 				HealthURL:     agent.Health.URL,
 				CheckInterval: agent.Health.CheckInterval,
 				MaxFailures:   agent.Health.MaxFailures,
-			}, logger)
+			}, emitter, logger)
 		case "on-demand":
 			pol = policy.NewOnDemand(serviceMgr, policy.OnDemandConfig{
 				Agent:              name,
@@ -86,7 +88,7 @@ func main() {
 				IdleTimeout:        agent.Idle.Timeout,
 				MaxFailures:        agent.Health.MaxFailures,
 				MaxRestartAttempts: agent.Health.MaxRestartAttempts,
-			}, p.Activity(), p.WSCounter(), logger)
+			}, p.Activity(), p.WSCounter(), emitter, logger)
 		case "unmanaged":
 			pol = policy.NewUnmanaged()
 		default:

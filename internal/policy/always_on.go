@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"warren/internal/container"
+	"warren/internal/events"
 )
 
 type AlwaysOn struct {
@@ -20,7 +21,8 @@ type AlwaysOn struct {
 	state    string
 	failures int
 
-	logger *slog.Logger
+	emitter *events.Emitter
+	logger  *slog.Logger
 }
 
 type AlwaysOnConfig struct {
@@ -30,18 +32,21 @@ type AlwaysOnConfig struct {
 	MaxFailures   int
 }
 
-func NewAlwaysOn(cfg AlwaysOnConfig, logger *slog.Logger) *AlwaysOn {
+func NewAlwaysOn(cfg AlwaysOnConfig, emitter *events.Emitter, logger *slog.Logger) *AlwaysOn {
 	return &AlwaysOn{
 		agent:         cfg.Agent,
 		healthURL:     cfg.HealthURL,
 		checkInterval: cfg.CheckInterval,
 		maxFailures:   cfg.MaxFailures,
 		state:         "starting",
+		emitter:       emitter,
 		logger:        logger.With("agent", cfg.Agent, "policy", "always-on"),
 	}
 }
 
 func (a *AlwaysOn) Start(ctx context.Context) {
+	a.emitter.Emit(events.Event{Type: events.AgentStarting, Agent: a.agent})
+
 	ticker := time.NewTicker(a.checkInterval)
 	defer ticker.Stop()
 
@@ -76,12 +81,14 @@ func (a *AlwaysOn) onHealthy() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	if a.state != "ready" {
-		a.logger.Info("agent became healthy", "state", "ready")
-	}
-
+	prev := a.state
 	a.state = "ready"
 	a.failures = 0
+
+	if prev != "ready" {
+		a.logger.Info("agent became healthy", "state", "ready")
+		a.emitter.Emit(events.Event{Type: events.AgentReady, Agent: a.agent})
+	}
 }
 
 func (a *AlwaysOn) onUnhealthy(err error) {
@@ -90,6 +97,7 @@ func (a *AlwaysOn) onUnhealthy(err error) {
 
 	a.failures++
 	a.logger.Warn("health check failed", "error", err, "consecutive_failures", a.failures)
+	a.emitter.Emit(events.Event{Type: events.AgentHealthFailed, Agent: a.agent, Fields: map[string]string{"error": err.Error()}})
 
 	if a.failures >= a.maxFailures {
 		if a.state != "degraded" {
@@ -97,6 +105,7 @@ func (a *AlwaysOn) onUnhealthy(err error) {
 				"consecutive_failures", a.failures,
 				"max_failures", a.maxFailures,
 			)
+			a.emitter.Emit(events.Event{Type: events.AgentDegraded, Agent: a.agent})
 		}
 		a.state = "degraded"
 	}
