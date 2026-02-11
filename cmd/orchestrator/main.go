@@ -60,6 +60,13 @@ func main() {
 
 	// Build proxy and policies.
 	registry := services.NewRegistry(logger)
+
+	// Wire event-driven service cleanup: purge dynamic routes when agents sleep.
+	emitter.OnEvent(func(ev events.Event) {
+		if ev.Type == events.AgentSleep {
+			registry.DeregisterByAgent(ev.Agent)
+		}
+	})
 	p := proxy.New(registry, logger)
 	var policies []policy.Policy
 
