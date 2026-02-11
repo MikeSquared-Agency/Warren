@@ -40,8 +40,19 @@ func (w *WSCounter) Count(hostname string) int64 {
 }
 
 func IsWebSocket(r *http.Request) bool {
-	return strings.EqualFold(r.Header.Get("Connection"), "upgrade") &&
+	return connectionHasUpgrade(r.Header.Get("Connection")) &&
 		strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+}
+
+// connectionHasUpgrade checks if "upgrade" appears as a token in a
+// potentially comma-separated Connection header value.
+func connectionHasUpgrade(value string) bool {
+	for _, token := range strings.Split(value, ",") {
+		if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+			return true
+		}
+	}
+	return false
 }
 
 func HandleWebSocket(w http.ResponseWriter, r *http.Request, backend *url.URL, hostname string, ws *WSCounter, activity *ActivityTracker, logger *slog.Logger) {
