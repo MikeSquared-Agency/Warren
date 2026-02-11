@@ -68,6 +68,15 @@ func (a *AlwaysOn) State() string {
 
 func (a *AlwaysOn) OnRequest() {}
 
+// Reconfigure updates runtime parameters that can change safely.
+func (a *AlwaysOn) Reconfigure(checkInterval time.Duration, maxFailures int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.checkInterval = checkInterval
+	a.maxFailures = maxFailures
+	a.logger.Info("reconfigured", "check_interval", checkInterval, "max_failures", maxFailures)
+}
+
 func (a *AlwaysOn) tick(ctx context.Context) {
 	err := container.CheckHealth(ctx, a.healthURL)
 	if err == nil {

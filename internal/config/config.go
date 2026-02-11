@@ -8,9 +8,18 @@ import (
 )
 
 type Config struct {
-	Listen   string            `yaml:"listen"`
-	Defaults Defaults          `yaml:"defaults"`
-	Agents   map[string]*Agent `yaml:"agents"`
+	Listen      string            `yaml:"listen"`
+	AdminListen string            `yaml:"admin_listen"` // e.g. ":9090", empty = disabled
+	Defaults    Defaults          `yaml:"defaults"`
+	Agents      map[string]*Agent `yaml:"agents"`
+	Webhooks    []WebhookConfig   `yaml:"webhooks"`
+	MaxReadyAgents int            `yaml:"max_ready_agents"` // 0 = unlimited
+}
+
+type WebhookConfig struct {
+	URL     string            `yaml:"url"`
+	Headers map[string]string `yaml:"headers"`
+	Events  []string          `yaml:"events"`
 }
 
 type Defaults struct {

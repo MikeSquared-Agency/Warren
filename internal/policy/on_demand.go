@@ -144,6 +144,32 @@ func (o *OnDemand) OnRequest() {
 	}
 }
 
+// Wake manually triggers a wake signal for this on-demand agent.
+func (o *OnDemand) Wake() {
+	o.OnRequest()
+}
+
+// Sleep manually puts the agent to sleep by stopping the container.
+func (o *OnDemand) Sleep(ctx context.Context) {
+	if o.State() != "ready" && o.State() != "degraded" {
+		return
+	}
+	o.logger.Info("manual sleep requested")
+	o.stopContainer(ctx)
+	o.setState("sleeping")
+}
+
+// Reconfigure updates runtime parameters that can change safely.
+func (o *OnDemand) Reconfigure(idleTimeout, checkInterval time.Duration, maxFailures, maxRestartAttempts int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.idleTimeout = idleTimeout
+	o.checkInterval = checkInterval
+	o.maxFailures = maxFailures
+	o.maxRestartAttempts = maxRestartAttempts
+	o.logger.Info("reconfigured", "idle_timeout", idleTimeout, "check_interval", checkInterval, "max_failures", maxFailures, "max_restart_attempts", maxRestartAttempts)
+}
+
 func (o *OnDemand) setState(s string) {
 	o.mu.Lock()
 	prev := o.state
