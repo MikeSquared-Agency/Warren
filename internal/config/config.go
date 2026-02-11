@@ -18,8 +18,9 @@ type Defaults struct {
 }
 
 type Agent struct {
-	Hostname  string    `yaml:"hostname"`
-	Backend   string    `yaml:"backend"`
+	Hostname  string   `yaml:"hostname"`
+	Hostnames []string `yaml:"hostnames"` // additional hostnames
+	Backend   string   `yaml:"backend"`
 	Policy    string    `yaml:"policy"`
 	Container Container `yaml:"container"`
 	Health    Health    `yaml:"health"`

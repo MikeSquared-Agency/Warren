@@ -52,10 +52,17 @@ func validate(cfg *Config) error {
 			}
 		}
 
-		if prev, ok := hostnames[agent.Hostname]; ok {
-			return fmt.Errorf("config: duplicate hostname %q (agents %q and %q)", agent.Hostname, prev, name)
+		// Check all hostnames (primary + additional) for duplicates.
+		allHostnames := append([]string{agent.Hostname}, agent.Hostnames...)
+		for _, h := range allHostnames {
+			if h == "" {
+				continue
+			}
+			if prev, ok := hostnames[h]; ok {
+				return fmt.Errorf("config: duplicate hostname %q (agents %q and %q)", h, prev, name)
+			}
+			hostnames[h] = name
 		}
-		hostnames[agent.Hostname] = name
 	}
 
 	return nil

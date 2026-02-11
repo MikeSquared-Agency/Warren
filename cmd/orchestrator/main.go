@@ -116,9 +116,13 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Register primary hostname and any additional hostnames.
 		p.Register(agent.Hostname, name, target, pol)
+		for _, h := range agent.Hostnames {
+			p.Register(h, name, target, pol)
+		}
 		policies = append(policies, pol)
-		logger.Info("agent configured", "name", name, "hostname", agent.Hostname, "policy", agent.Policy)
+		logger.Info("agent configured", "name", name, "hostname", agent.Hostname, "extra_hostnames", len(agent.Hostnames), "policy", agent.Policy)
 	}
 
 	// Start policy goroutines.
