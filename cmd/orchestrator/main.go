@@ -19,6 +19,7 @@ import (
 	"warren/internal/events"
 	"warren/internal/policy"
 	"warren/internal/proxy"
+	"warren/internal/services"
 )
 
 func main() {
@@ -58,7 +59,8 @@ func main() {
 	emitter := events.NewEmitter(logger)
 
 	// Build proxy and policies.
-	p := proxy.New(logger)
+	registry := services.NewRegistry(logger)
+	p := proxy.New(registry, logger)
 	var policies []policy.Policy
 
 	for name, agent := range cfg.Agents {
