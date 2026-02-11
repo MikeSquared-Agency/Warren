@@ -1,10 +1,12 @@
-.PHONY: build run clean
+.PHONY: build test lint ci
 
 build:
-	go build -o bin/orchestrator ./cmd/orchestrator
+	go build ./...
 
-run: build
-	./bin/orchestrator --config configs/orchestrator.yaml
+test:
+	go test ./... -v -race -count=1
 
-clean:
-	rm -rf bin/
+lint:
+	golangci-lint run ./...
+
+ci: build test lint
