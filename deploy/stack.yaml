@@ -4,7 +4,9 @@
 version: "3.8"
 
 # Encrypted overlay network for agent traffic.
-# Warren routes to agents over this network — no published ports needed.
+# Warren routes to agents over this network using Swarm DNS:
+#   http://tasks.<service-name>:<port>
+# No published ports needed — all traffic stays on the overlay.
 networks:
   agents:
     driver: overlay
@@ -18,24 +20,42 @@ secrets:
     external: true
 
 services:
+  # The Warren orchestrator itself.
+  orchestrator:
+    image: ghcr.io/your-org/warren:latest
+    networks:
+      - agents
+    ports:
+      - "8080:8080"
+    configs:
+      - source: orchestrator_config
+        target: /etc/warren/orchestrator.yaml
+    command: ["./orchestrator", "--config", "/etc/warren/orchestrator.yaml"]
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager  # needs access to Swarm API
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   # Example always-on agent service.
   # Swarm maintains exactly 1 replica and restarts on failure.
+  # Warren config backend: "http://tasks.warren_example-agent:8080"
   example-agent:
     image: ghcr.io/your-org/your-agent:latest
     networks:
       - agents
     # No published ports — Warren proxies traffic via the overlay network.
+    # Reachable at: http://tasks.warren_example-agent:<port>
 
     deploy:
-      # Single replica, always running.
       replicas: 1
-
       restart_policy:
         condition: any
         delay: 5s
         max_attempts: 10
         window: 120s
-
       resources:
         limits:
           cpus: "2.0"
@@ -44,7 +64,6 @@ services:
           cpus: "0.5"
           memory: 512M
 
-    # Docker-level health check. Warren also polls its own health endpoint.
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -54,6 +73,39 @@ services:
 
     secrets:
       - agent_api_key
-
     environment:
       - AGENT_NAME=example
+
+  # Example on-demand agent service.
+  # Warren scales this between 0 and 1 replicas.
+  # Warren config backend: "http://tasks.warren_on-demand-agent:8080"
+  on-demand-agent:
+    image: ghcr.io/your-org/your-on-demand-agent:latest
+    networks:
+      - agents
+
+    deploy:
+      replicas: 0  # Warren manages scaling
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    environment:
+      - AGENT_NAME=on-demand
+
+configs:
+  orchestrator_config:
+    file: ../configs/orchestrator.example.yaml

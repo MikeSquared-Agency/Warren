@@ -129,26 +129,25 @@ defaults:
 agents:
   my-agent:
     hostname: "agent.yourdomain.com"
-    backend: "http://localhost:18790"
+    # Use Swarm DNS for overlay network routing (no published ports needed).
+    backend: "http://tasks.openclaw_my-agent:18790"
     policy: always-on
     container:
-      name: "my-agent-service"
-      mode: service
+      name: "openclaw_my-agent"
     health:
-      url: "http://localhost:18790/health"
+      url: "http://tasks.openclaw_my-agent:18790/health"
       check_interval: 30s
       max_failures: 3
       max_restart_attempts: 10
 
   my-on-demand-agent:
     hostname: "dev.yourdomain.com"
-    backend: "http://localhost:8081"
+    backend: "http://tasks.openclaw_my-dev-agent:8081"
     policy: on-demand
     container:
-      name: "my-dev-agent"
-      mode: service
+      name: "openclaw_my-dev-agent"
     health:
-      url: "http://localhost:8081/api/health"
+      url: "http://tasks.openclaw_my-dev-agent:8081/api/health"
       startup_timeout: 60s
       max_failures: 3
       max_restart_attempts: 5
@@ -200,10 +199,10 @@ One rule. Never needs changing again.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `hostname` | string | yes | Hostname to route to this agent |
-| `backend` | string | yes | URL of the agent's HTTP endpoint |
+| `backend` | string | yes | URL of the agent's HTTP endpoint. In Swarm mode, use Swarm DNS: `http://tasks.<stack>_<service>:<port>` |
 | `policy` | string | yes | `unmanaged`, `always-on`, or `on-demand` |
 | `container.name` | string | for managed policies | Docker container or Swarm service name |
-| `container.mode` | string | no | `container` (default) or `service` (Swarm) |
+| `idle.drain_timeout` | duration | `30s` | Max time to wait for WebSocket drain on shutdown |
 | `health.url` | string | for managed policies | Health check URL |
 | `health.check_interval` | duration | from defaults | How often to poll health |
 | `health.startup_timeout` | duration | `60s` | Max time to wait for healthy on startup |

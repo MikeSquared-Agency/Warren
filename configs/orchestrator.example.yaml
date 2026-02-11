@@ -6,36 +6,39 @@ defaults:
 agents:
   root:
     hostname: "kai.darlington.dev"
-    backend: "http://localhost:18789"
+    # Swarm DNS: http://tasks.<stack>_<service>:<port>
+    backend: "http://tasks.warren_root-agent:18789"
     policy: unmanaged
 
   friend:
     hostname: "friend.darlington.dev"
-    backend: "http://localhost:18790"
+    # Swarm DNS routes to the running task on the overlay network.
+    backend: "http://tasks.warren_friend-agent:18790"
     policy: always-on
     container:
-      name: "openclaw-friend"
+      name: "warren_friend-agent"
       labels:
         orchestrator.agent: friend
     health:
-      url: "http://localhost:18790"
+      url: "http://tasks.warren_friend-agent:18790"
       check_interval: 30s
       max_failures: 3
       max_restart_attempts: 10
 
   mc:
     hostname: "mc.darlington.dev"
-    backend: "http://localhost:8081"
+    backend: "http://tasks.warren_mc-agent:8081"
     policy: on-demand
     container:
-      name: "dutybound-mc"
+      name: "warren_mc-agent"
       labels:
         orchestrator.agent: mc
     health:
-      url: "http://localhost:8081/api/health"
+      url: "http://tasks.warren_mc-agent:8081/api/health"
       check_interval: 30s
       startup_timeout: 60s
       max_failures: 3
       max_restart_attempts: 5
     idle:
       timeout: 30m
+      drain_timeout: 30s
