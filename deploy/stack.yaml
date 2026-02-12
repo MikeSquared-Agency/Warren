@@ -41,10 +41,13 @@ services:
       - GEMINI_API_KEY=AIzaSyCMnoSY8R0Pn9Y6AWaJuJmi8ITXM8x5H3A
       - OPENCLAW_GATEWAY_PORT=18790
       - OPENCLAW_MODEL=google/gemini-2.0-flash
+      - NATS_URL=nats://warren_hermes:4222
+      - AGENT_ID=lily
       - OPENCLAW_PREFER_PNPM=1
       - NODE_ENV=production
     volumes:
       - /home/mike/openclaw-friend/friend-openclaw-data:/home/node/.openclaw
+      - /home/mike/shared-bin:/usr/local/shared-bin:ro
     command: ["/bin/sh", "/home/node/.openclaw/pull-soul-entrypoint.sh"]
 
   dutybound-mc:
@@ -139,10 +142,12 @@ services:
       - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
       - ALEXANDRIA_URL=http://192.168.1.218:8500
       - AGENT_ID=celebrimbor
+      - NATS_URL=nats://warren_hermes:4222
       - OPENCLAW_GATEWAY_PORT=18791
       - NODE_ENV=production
     volumes:
       - /home/mike/celebrimbor-data:/home/node/.openclaw
+      - /home/mike/shared-bin:/usr/local/shared-bin:ro
     command: ["/bin/sh", "/home/node/.openclaw/pull-auth-entrypoint.sh"]
 
   alexandria:
@@ -184,3 +189,33 @@ services:
         limits:
           cpus: "1.0"
           memory: 1G
+
+  dispatch:
+    image: dispatch:latest
+    networks:
+      - agents
+    ports:
+      - "8600:8600"
+      - "8601:8601"
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    environment:
+      - DISPATCH_PORT=8600
+      - DISPATCH_METRICS_PORT=8601
+      - DISPATCH_ADMIN_TOKEN=dispatch-admin-868f36e0
+      - DISPATCH_DATABASE_URL=postgresql://postgres:TnNHutUQb4eHfX6g@db.uaubofpmokvumbqpeymz.supabase.co:5432/postgres
+      - DISPATCH_HERMES_URL=nats://warren_hermes:4222
+      - DISPATCH_WARREN_URL=http://192.168.1.218:9090
+      - DISPATCH_WARREN_TOKEN=warren-admin-868f36e0
+      - DISPATCH_FORGE_URL=http://warren_promptforge:8083
+      - DISPATCH_ALEXANDRIA_URL=http://192.168.1.218:8500
+      - DISPATCH_TICK_INTERVAL_MS=5000
