@@ -20,6 +20,38 @@ secrets:
     external: true
 
 services:
+  # Hermes — NATS message bus with JetStream for inter-agent communication.
+  hermes:
+    image: nats:latest
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    networks:
+      - agents
+    ports:
+      - "4222:4222"   # NATS client (published for bare-metal orchestrator)
+      - "8222:8222"   # HTTP monitoring
+    volumes:
+      - hermes-data:/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
   # The Warren orchestrator itself.
   orchestrator:
     image: ghcr.io/your-org/warren:latest
@@ -110,6 +142,10 @@ services:
 
     environment:
       - AGENT_NAME=on-demand
+
+volumes:
+  hermes-data:
+    driver: local
 
 configs:
   orchestrator_config:

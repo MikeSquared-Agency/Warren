@@ -19,6 +19,7 @@ import (
 	"warren/internal/config"
 	"warren/internal/container"
 	"warren/internal/events"
+	"warren/internal/hermes"
 	"warren/internal/metrics"
 	"warren/internal/policy"
 	"warren/internal/proxy"
@@ -60,6 +61,61 @@ func main() {
 
 	serviceMgr := container.NewManager(docker, logger)
 	emitter := events.NewEmitter(logger)
+
+	// Connect to Hermes (NATS) if enabled.
+	var hermesClient *hermes.Client
+	if cfg.Hermes.Enabled {
+		hermesClient, err = hermes.Connect(hermes.Config{
+			URL:            cfg.Hermes.URL,
+			Token:          cfg.Hermes.Token,
+			ConnectTimeout: cfg.Hermes.ConnectTimeout,
+			ReconnectWait:  cfg.Hermes.ReconnectWait,
+			MaxReconnects:  cfg.Hermes.MaxReconnects,
+		}, "warren-orchestrator", logger)
+		if err != nil {
+			logger.Error("failed to connect to hermes", "error", err)
+			os.Exit(1)
+		}
+		defer hermesClient.Close()
+
+		// Provision JetStream streams.
+		if err := hermesClient.ProvisionStreams(ctx); err != nil {
+			logger.Error("failed to provision hermes streams", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("hermes connected and streams provisioned", "url", cfg.Hermes.URL)
+
+		// Bridge Warren events to Hermes.
+		emitter.OnEvent(func(ev events.Event) {
+			var subject, eventType string
+			var data any
+
+			switch ev.Type {
+			case events.AgentWake, events.AgentStarting:
+				subject = hermes.AgentSubject(hermes.SubjectAgentStarted, ev.Agent)
+				eventType = "agent.started"
+				data = hermes.AgentLifecycleData{Agent: ev.Agent, Reason: ev.Fields["reason"]}
+			case events.AgentSleep:
+				subject = hermes.AgentSubject(hermes.SubjectAgentStopped, ev.Agent)
+				eventType = "agent.stopped"
+				data = hermes.AgentLifecycleData{Agent: ev.Agent, Reason: ev.Fields["reason"]}
+			case events.AgentReady:
+				subject = hermes.AgentSubject(hermes.SubjectAgentReady, ev.Agent)
+				eventType = "agent.ready"
+				data = hermes.AgentLifecycleData{Agent: ev.Agent}
+			case events.AgentDegraded:
+				subject = hermes.AgentSubject(hermes.SubjectAgentDegraded, ev.Agent)
+				eventType = "agent.degraded"
+				data = hermes.AgentLifecycleData{Agent: ev.Agent, Reason: ev.Fields["reason"]}
+			default:
+				return // don't bridge unknown events
+			}
+
+			if err := hermesClient.PublishEvent(subject, eventType, data); err != nil {
+				logger.Error("hermes publish failed", "subject", subject, "error", err)
+			}
+		})
+	}
 
 	// Build proxy and policies.
 	registry := services.NewRegistry(logger)

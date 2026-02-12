@@ -8,13 +8,23 @@ import (
 )
 
 type Config struct {
-	Listen      string            `yaml:"listen"`
-	AdminListen string            `yaml:"admin_listen"` // e.g. ":9090", empty = disabled
-	AdminToken  string            `yaml:"admin_token"`  // bearer token for admin API auth
-	Defaults    Defaults          `yaml:"defaults"`
-	Agents      map[string]*Agent `yaml:"agents"`
-	Webhooks    []WebhookConfig   `yaml:"webhooks"`
-	MaxReadyAgents int            `yaml:"max_ready_agents"` // 0 = unlimited
+	Listen         string            `yaml:"listen"`
+	AdminListen    string            `yaml:"admin_listen"` // e.g. ":9090", empty = disabled
+	AdminToken     string            `yaml:"admin_token"`  // bearer token for admin API auth
+	Defaults       Defaults          `yaml:"defaults"`
+	Agents         map[string]*Agent `yaml:"agents"`
+	Webhooks       []WebhookConfig   `yaml:"webhooks"`
+	MaxReadyAgents int               `yaml:"max_ready_agents"` // 0 = unlimited
+	Hermes         HermesConfig      `yaml:"hermes"`
+}
+
+type HermesConfig struct {
+	Enabled        bool          `yaml:"enabled"`
+	URL            string        `yaml:"url"`
+	Token          string        `yaml:"token"`
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
+	ReconnectWait  time.Duration `yaml:"reconnect_wait"`
+	MaxReconnects  int           `yaml:"max_reconnects"`
 }
 
 type WebhookConfig struct {
@@ -91,6 +101,19 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Defaults.HealthCheckInterval == 0 {
 		cfg.Defaults.HealthCheckInterval = 30 * time.Second
+	}
+
+	if cfg.Hermes.URL == "" {
+		cfg.Hermes.URL = "nats://localhost:4222"
+	}
+	if cfg.Hermes.ConnectTimeout == 0 {
+		cfg.Hermes.ConnectTimeout = 5 * time.Second
+	}
+	if cfg.Hermes.ReconnectWait == 0 {
+		cfg.Hermes.ReconnectWait = 2 * time.Second
+	}
+	if cfg.Hermes.MaxReconnects == 0 {
+		cfg.Hermes.MaxReconnects = -1
 	}
 
 	for _, agent := range cfg.Agents {
