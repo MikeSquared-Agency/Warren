@@ -36,6 +36,8 @@ services:
           memory: 512M
     environment:
       - OPENCLAW_GATEWAY_TOKEN=password
+      - FORGE_URL=http://warren_promptforge:8083
+      - SOUL_SLUG=lily
       - GEMINI_API_KEY=***REMOVED***
       - OPENCLAW_GATEWAY_PORT=18790
       - OPENCLAW_MODEL=google/gemini-2.0-flash
@@ -43,7 +45,7 @@ services:
       - NODE_ENV=production
     volumes:
       - /home/mike/openclaw-friend/friend-openclaw-data:/home/node/.openclaw
-    command: ["node", "/app/openclaw.mjs", "gateway", "--bind", "lan", "--port", "18790", "--allow-unconfigured"]
+    command: ["/bin/sh", "/home/node/.openclaw/pull-soul-entrypoint.sh"]
 
   dutybound-mc:
     image: dutybound-mc:latest
