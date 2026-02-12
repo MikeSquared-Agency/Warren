@@ -17,12 +17,19 @@ type Config struct {
 	MaxReadyAgents int               `yaml:"max_ready_agents"` // 0 = unlimited
 	Hermes         HermesConfig      `yaml:"hermes"`
 	Alexandria     AlexandriaConfig  `yaml:"alexandria"`
+	SSH            SSHConfig         `yaml:"ssh"`
 }
 
 type AlexandriaConfig struct {
 	Enabled bool          `yaml:"enabled"`
 	URL     string        `yaml:"url"`
 	Timeout time.Duration `yaml:"timeout"`
+}
+
+type SSHConfig struct {
+	Enabled            bool   `yaml:"enabled"`
+	AlexandriaURL      string `yaml:"alexandria_url"`
+	AuthorizedKeysPath string `yaml:"authorized_keys_path"`
 }
 
 type HermesConfig struct {
@@ -133,6 +140,14 @@ func applyDefaults(cfg *Config) {
 	// so to disable Alexandria, set enabled: false explicitly in config.
 	if !cfg.Alexandria.Enabled {
 		cfg.Alexandria.Enabled = true
+	}
+
+	// SSH defaults
+	if cfg.SSH.AlexandriaURL == "" {
+		cfg.SSH.AlexandriaURL = "http://localhost:8500"
+	}
+	if cfg.SSH.AuthorizedKeysPath == "" {
+		cfg.SSH.AuthorizedKeysPath = "/home/{username}/.ssh/authorized_keys"
 	}
 
 	for _, agent := range cfg.Agents {
