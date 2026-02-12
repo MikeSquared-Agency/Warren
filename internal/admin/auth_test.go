@@ -39,7 +39,9 @@ func testServerWithToken(t *testing.T, token string) *Server {
 		make(map[string]policy.Policy),
 		make(map[string]context.CancelFunc),
 		registry, emitter, nil, p, cfg, tmpFile.Name(),
-		func() int64 { return 0 }, logger,
+		func() int64 { return 0 },
+		nil, // no hermes client in tests
+		logger,
 	)
 }
 

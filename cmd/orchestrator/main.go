@@ -272,7 +272,7 @@ func main() {
 				IdleTimeout:   agent.Idle.Timeout.String(),
 			}
 		}
-		adminSrv = admin.NewServer(agentInfos, policyByName, policyCancels, registry, emitter, serviceMgr, p, cfg, *configPath, p.WSCounter().Total, logger)
+		adminSrv = admin.NewServer(agentInfos, policyByName, policyCancels, registry, emitter, serviceMgr, p, cfg, *configPath, p.WSCounter().Total, hermesClient, logger)
 
 		// Mount metrics on admin handler.
 		adminMux := http.NewServeMux()

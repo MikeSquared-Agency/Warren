@@ -22,6 +22,7 @@ import (
 	"warren/internal/policy"
 	"warren/internal/proxy"
 	"warren/internal/services"
+	"warren/internal/hermes"
 )
 
 // AgentInfo describes a configured agent.
@@ -68,6 +69,7 @@ type Server struct {
 	logger    *slog.Logger
 	startAt   time.Time
 	wsTotal   func() int64
+	hermes    *hermes.Client
 }
 
 // NewServer creates a new admin server.
@@ -82,6 +84,7 @@ func NewServer(
 	cfg *config.Config,
 	cfgPath string,
 	wsTotal func() int64,
+	hermes *hermes.Client,
 	logger *slog.Logger,
 ) *Server {
 	l := logger.With("component", "admin")
@@ -100,6 +103,7 @@ func NewServer(
 		cfgPath:   cfgPath,
 		authToken: cfg.AdminToken,
 		wsTotal:   wsTotal,
+		hermes:    hermes,
 		logger:    l,
 		startAt:   time.Now(),
 	}
@@ -615,6 +619,9 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract remote IP for logging
+	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+
 	// Query Alexandria for devices
 	devices, err := s.getAlexandriaDevices()
 	if err != nil {
@@ -641,6 +648,22 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
+
+		// Log the denied request
+		s.logger.Info("SSH authorization denied", "username", req.Username, "fingerprint", req.Fingerprint, "reason", "unregistered device", "remote_ip", remoteIP)
+
+		// Publish Hermes event for SSH denial
+		if s.hermes != nil {
+			if err := s.hermes.PublishEvent(hermes.SubjectSSHDenied, "ssh.denied", hermes.SSHDeniedData{
+				Fingerprint: req.Fingerprint,
+				Username:    req.Username,
+				Reason:      "unregistered device",
+				RemoteIP:    remoteIP,
+			}); err != nil {
+				s.logger.Error("failed to publish SSH denied event", "error", err)
+			}
+		}
+
 		return
 	}
 
@@ -671,6 +694,19 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
+
+		// Publish Hermes event for SSH denial
+		if s.hermes != nil {
+			if err := s.hermes.PublishEvent(hermes.SubjectSSHDenied, "ssh.denied", hermes.SSHDeniedData{
+				Fingerprint: req.Fingerprint,
+				Username:    req.Username,
+				Reason:      "public key not found",
+				RemoteIP:    remoteIP,
+			}); err != nil {
+				s.logger.Error("failed to publish SSH denied event", "error", err)
+			}
+		}
+
 		return
 	}
 
@@ -685,6 +721,24 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+
+	// Log the successful authorization
+	s.logger.Info("SSH authorization successful", "username", req.Username, "fingerprint", req.Fingerprint, "device", matchedDevice.Identifier, "person", personName, "remote_ip", remoteIP)
+
+	// Publish Hermes event for successful SSH authorization
+	if s.hermes != nil {
+		if err := s.hermes.PublishEvent(hermes.SubjectSSHAuthorized, "ssh.authorized", hermes.SSHAuthorizedData{
+			Device:      matchedDevice.Identifier,
+			Person:      personName,
+			PersonID:    personID,
+			Fingerprint: req.Fingerprint,
+			Username:    req.Username,
+			RemoteIP:    remoteIP,
+		}); err != nil {
+			s.logger.Error("failed to publish SSH authorized event", "error", err)
+		}
+	}
+
 }
 
 // handleSSHAuthorizedKeys handles the GET /ssh/authorized-keys/{username} endpoint.
@@ -780,6 +834,10 @@ func (s *Server) handleSSHAuthorizedKeys(w http.ResponseWriter, r *http.Request)
 	for _, key := range allowedKeys {
 		fmt.Fprintln(w, key)
 	}
+
+	// Log the authorized keys request
+	s.logger.Info("SSH authorized keys request", "username", username, "remote_ip", remoteIP, "key_count", len(allowedKeys))
+
 }
 
 // getAlexandriaDevices retrieves devices from Alexandria API.

@@ -25,6 +25,10 @@ const (
 	SubjectSystemConfig    = "swarm.system.config"
 	SubjectSystemShutdown  = "swarm.system.shutdown"
 
+	// SSH subjects.
+	SubjectSSHAuthorized = "swarm.system.ssh.authorized"
+	SubjectSSHDenied     = "swarm.system.ssh.denied"
+
 	// Wildcard patterns for subscriptions.
 	SubjectAllAgents = "swarm.agent.>"
 	SubjectAllTasks  = "swarm.task.>"

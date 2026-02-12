@@ -81,3 +81,23 @@ type DiscoveryData struct {
 	Content string   `json:"content"`
 	Tags    []string `json:"tags,omitempty"`
 }
+
+// SSH event data types.
+
+// SSHAuthorizedData is the payload for successful SSH authorization events.
+type SSHAuthorizedData struct {
+	Device      string `json:"device"`
+	Person      string `json:"person"`
+	PersonID    string `json:"person_id"`
+	Fingerprint string `json:"fingerprint"`
+	Username    string `json:"username"`
+	RemoteIP    string `json:"remote_ip,omitempty"`
+}
+
+// SSHDeniedData is the payload for denied SSH authorization events.
+type SSHDeniedData struct {
+	Fingerprint string `json:"fingerprint"`
+	Username    string `json:"username,omitempty"`
+	Reason      string `json:"reason"`
+	RemoteIP    string `json:"remote_ip,omitempty"`
+}
