@@ -67,3 +67,17 @@ type AgentScaleData struct {
 	To       int    `json:"to"`
 	Reason   string `json:"reason,omitempty"`
 }
+
+// AgentBriefedData is the payload for agent briefed events.
+type AgentBriefedData struct {
+	Agent     string `json:"agent"`
+	ItemCount int    `json:"item_count"`
+	Summary   string `json:"summary,omitempty"`
+}
+
+// DiscoveryData is the payload for agent discovery events.
+type DiscoveryData struct {
+	Agent   string   `json:"agent"`
+	Content string   `json:"content"`
+	Tags    []string `json:"tags,omitempty"`
+}

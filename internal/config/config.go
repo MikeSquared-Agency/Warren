@@ -16,6 +16,13 @@ type Config struct {
 	Webhooks       []WebhookConfig   `yaml:"webhooks"`
 	MaxReadyAgents int               `yaml:"max_ready_agents"` // 0 = unlimited
 	Hermes         HermesConfig      `yaml:"hermes"`
+	Alexandria     AlexandriaConfig  `yaml:"alexandria"`
+}
+
+type AlexandriaConfig struct {
+	Enabled bool          `yaml:"enabled"`
+	URL     string        `yaml:"url"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 type HermesConfig struct {
@@ -114,6 +121,18 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Hermes.MaxReconnects == 0 {
 		cfg.Hermes.MaxReconnects = -1
+	}
+
+	if cfg.Alexandria.URL == "" {
+		cfg.Alexandria.URL = "http://warren_alexandria:8500"
+	}
+	if cfg.Alexandria.Timeout == 0 {
+		cfg.Alexandria.Timeout = 5 * time.Second
+	}
+	// Default enabled=true. Plain bool can't distinguish unset from false,
+	// so to disable Alexandria, set enabled: false explicitly in config.
+	if !cfg.Alexandria.Enabled {
+		cfg.Alexandria.Enabled = true
 	}
 
 	for _, agent := range cfg.Agents {

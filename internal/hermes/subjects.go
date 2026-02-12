@@ -10,6 +10,10 @@ const (
 	SubjectAgentReady    = "swarm.agent.%s.ready"
 	SubjectAgentDegraded = "swarm.agent.%s.degraded"
 	SubjectAgentScaled   = "swarm.agent.%s.scaled"
+	SubjectAgentBriefed  = "swarm.agent.%s.briefed"
+
+	// Discovery subjects.
+	SubjectAgentDiscovery = "swarm.agent.%s.discovery"
 
 	// Task subjects.
 	SubjectTaskAssigned  = "swarm.task.%s.assigned"

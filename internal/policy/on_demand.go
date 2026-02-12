@@ -51,6 +51,9 @@ type OnDemand struct {
 	lastSleepTime time.Time     // tracks when agent last went to sleep
 	wakeCh        chan struct{} // buffered(1), signals wake request
 
+	// OnReady is called after the agent becomes ready. Used for briefing injection.
+	OnReady func(ctx context.Context, agentID string, lastSleepTime time.Time)
+
 	logger *slog.Logger
 }
 
@@ -251,6 +254,13 @@ func (o *OnDemand) waitForReady(ctx context.Context) {
 				o.setState("ready")
 				// Touch activity so idle timer starts from now.
 				o.activity.Touch(o.hostname)
+				// Run briefing hook if configured.
+				if o.OnReady != nil {
+					o.mu.RLock()
+					sleepTime := o.lastSleepTime
+					o.mu.RUnlock()
+					go o.OnReady(ctx, o.agent, sleepTime)
+				}
 				return
 			}
 		}

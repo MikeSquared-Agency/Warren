@@ -128,6 +128,16 @@ func (c *Client) Request(subject string, event Event, timeout time.Duration) (*E
 	return &reply, nil
 }
 
+// PublishDiscovery publishes a discovery event that Alexandria will auto-capture.
+func (c *Client) PublishDiscovery(agentID, content string, tags []string) error {
+	subject := AgentSubject(SubjectAgentDiscovery, agentID)
+	return c.PublishEvent(subject, "agent.discovery", DiscoveryData{
+		Agent:   agentID,
+		Content: content,
+		Tags:    tags,
+	})
+}
+
 // ProvisionStreams creates or updates all JetStream streams.
 func (c *Client) ProvisionStreams(ctx context.Context) error {
 	for _, cfg := range StreamConfigs {

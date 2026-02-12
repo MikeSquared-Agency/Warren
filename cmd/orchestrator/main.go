@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -9,12 +10,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/docker/docker/client"
 
 	"warren/internal/admin"
+	"warren/internal/alexandria"
 	"warren/internal/alerts"
 	"warren/internal/config"
 	"warren/internal/container"
@@ -117,6 +120,17 @@ func main() {
 		})
 	}
 
+	// Alexandria briefing client.
+	var alexClient *alexandria.Client
+	if cfg.Alexandria.Enabled {
+		alexClient = alexandria.NewClient(alexandria.Config{
+			Enabled: cfg.Alexandria.Enabled,
+			URL:     cfg.Alexandria.URL,
+			Timeout: cfg.Alexandria.Timeout,
+		}, logger)
+		logger.Info("alexandria client configured", "url", cfg.Alexandria.URL)
+	}
+
 	// Build proxy and policies.
 	registry := services.NewRegistry(logger)
 
@@ -150,6 +164,48 @@ func main() {
 		for _, h := range agent.Hostnames {
 			p.Register(h, name, target, pol)
 		}
+		// Wire Alexandria briefing hook for on-demand agents.
+		if od, ok := pol.(*policy.OnDemand); ok && alexClient != nil {
+			agentName := name
+			od.OnReady = func(ctx context.Context, agentID string, lastSleepTime time.Time) {
+				briefing, err := alexClient.GetBriefing(ctx, agentID, lastSleepTime, 50)
+				if err != nil {
+					logger.Error("failed to get briefing", "agent", agentID, "error", err)
+					return
+				}
+				if briefing == nil {
+					logger.Info("no briefing available", "agent", agentID)
+					return
+				}
+
+				// Write briefing to file.
+				dir := "/tmp/warren-briefings"
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					logger.Error("failed to create briefing dir", "error", err)
+					return
+				}
+				data, _ := json.Marshal(briefing)
+				path := filepath.Join(dir, agentID+".json")
+				if err := os.WriteFile(path, data, 0644); err != nil {
+					logger.Error("failed to write briefing", "agent", agentID, "error", err)
+					return
+				}
+				logger.Info("briefing written", "agent", agentID, "path", path, "items", briefing.ItemCount)
+
+				// Publish briefed event on Hermes.
+				if hermesClient != nil {
+					subject := hermes.AgentSubject(hermes.SubjectAgentBriefed, agentName)
+					if err := hermesClient.PublishEvent(subject, "agent.briefed", hermes.AgentBriefedData{
+						Agent:     agentID,
+						ItemCount: briefing.ItemCount,
+						Summary:   briefing.Summary,
+					}); err != nil {
+						logger.Error("failed to publish briefed event", "agent", agentID, "error", err)
+					}
+				}
+			}
+		}
+
 		policyByName[name] = pol
 		policyCancels[name] = polCancel
 		logger.Info("agent configured", "name", name, "hostname", agent.Hostname, "extra_hostnames", len(agent.Hostnames), "policy", agent.Policy)
