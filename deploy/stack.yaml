@@ -39,8 +39,9 @@ services:
       - FORGE_URL=http://warren_promptforge:8083
       - SOUL_SLUG=lily
       - GEMINI_API_KEY=AIzaSyCMnoSY8R0Pn9Y6AWaJuJmi8ITXM8x5H3A
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENCLAW_GATEWAY_PORT=18790
-      - OPENCLAW_MODEL=google/gemini-2.0-flash
+      - OPENCLAW_MODEL=openai/gpt-4o-mini
       - NATS_URL=nats://warren_hermes:4222
       - AGENT_ID=lily
       - OPENCLAW_PREFER_PNPM=1
