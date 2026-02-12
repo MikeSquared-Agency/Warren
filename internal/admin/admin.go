@@ -1,6 +1,11 @@
 package admin
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/base64"
+	"net"
+	"os"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,6 +113,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/services", s.handleServices)
 	mux.HandleFunc("/admin/health", s.handleHealth)
 	mux.HandleFunc("/admin/events", s.handleSSE)
+	// SSH endpoints (only available if SSH is enabled)
+	if s.cfg.SSH.Enabled {
+		mux.HandleFunc("/admin/ssh/authorize", s.handleSSHAuthorize)
+	}
 	return s.authMiddleware(mux)
 }
 
@@ -530,4 +539,340 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 
 	s.logger.Info("admin server starting", "addr", addr)
 	return srv.ListenAndServe()
+}
+
+// SSHHandler returns an http.Handler for SSH-related endpoints that don't require admin authentication.
+func (s *Server) SSHHandler() http.Handler {
+	mux := http.NewServeMux()
+	if s.cfg.SSH.Enabled {
+		mux.HandleFunc("/ssh/authorized-keys/", s.handleSSHAuthorizedKeys)
+	}
+	return mux
+}
+
+// SSH-related types and methods
+
+// SSHAuthorizeRequest represents the request for SSH authorization.
+type SSHAuthorizeRequest struct {
+	Fingerprint string `json:"fingerprint"`
+	Username    string `json:"username"`
+}
+
+// SSHAuthorizeResponse represents the response for SSH authorization.
+type SSHAuthorizeResponse struct {
+	Allowed   bool   `json:"allowed"`
+	Device    string `json:"device,omitempty"`
+	Person    string `json:"person,omitempty"`
+	PersonID  string `json:"person_id,omitempty"`
+	PublicKey string `json:"public_key,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// AlexandriaDevice represents a device from Alexandria API.
+type AlexandriaDevice struct {
+	Identifier string                 `json:"identifier"`
+	OwnerID    string                 `json:"owner_id"`
+	Metadata   map[string]interface{} `json:"metadata"`
+}
+
+// AlexandriaPerson represents a person from Alexandria API.
+type AlexandriaPerson struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// AlexandriaDevicesResponse represents the response from Alexandria devices API.
+type AlexandriaDevicesResponse struct {
+	Data []AlexandriaDevice `json:"data"`
+}
+
+// AlexandriaPeopleResponse represents the response from Alexandria people API.
+type AlexandriaPeopleResponse struct {
+	Data []AlexandriaPerson `json:"data"`
+}
+
+// handleSSHAuthorize handles the POST /admin/ssh/authorize endpoint.
+func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if SSH is enabled
+	if !s.cfg.SSH.Enabled {
+		http.Error(w, `{"error":"SSH authorization is disabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	var req SSHAuthorizeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Fingerprint == "" || req.Username == "" {
+		http.Error(w, `{"error":"fingerprint and username are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Query Alexandria for devices
+	devices, err := s.getAlexandriaDevices()
+	if err != nil {
+		s.logger.Error("failed to get devices from Alexandria", "error", err)
+		http.Error(w, `{"error":"failed to query device registry"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Find device with matching SSH fingerprint
+	var matchedDevice *AlexandriaDevice
+	for _, device := range devices {
+		if fingerprint, ok := device.Metadata["ssh_fingerprint"].(string); ok {
+			if fingerprint == req.Fingerprint {
+				matchedDevice = &device
+				break
+			}
+		}
+	}
+
+	if matchedDevice == nil {
+		response := SSHAuthorizeResponse{
+			Allowed: false,
+			Reason:  "unregistered device",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Get person information
+	people, err := s.getAlexandriaPeople()
+	if err != nil {
+		s.logger.Error("failed to get people from Alexandria", "error", err)
+		http.Error(w, `{"error":"failed to query people registry"}`, http.StatusInternalServerError)
+		return
+	}
+
+	var personName, personID string
+	for _, person := range people {
+		if person.ID == matchedDevice.OwnerID {
+			personName = person.Name
+			personID = person.ID
+			break
+		}
+	}
+
+	// Get the public key from authorized_keys file
+	publicKey, err := s.getPublicKeyByFingerprint(req.Username, req.Fingerprint)
+	if err != nil {
+		s.logger.Error("failed to get public key", "error", err, "fingerprint", req.Fingerprint)
+		response := SSHAuthorizeResponse{
+			Allowed: false,
+			Reason:  "public key not found",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Success response
+	response := SSHAuthorizeResponse{
+		Allowed:   true,
+		Device:    matchedDevice.Identifier,
+		Person:    personName,
+		PersonID:  personID,
+		PublicKey: publicKey,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleSSHAuthorizedKeys handles the GET /ssh/authorized-keys/{username} endpoint.
+func (s *Server) handleSSHAuthorizedKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if SSH is enabled
+	if !s.cfg.SSH.Enabled {
+		http.Error(w, `{"error":"SSH authorization is disabled"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	// Extract username from path
+	path := strings.TrimPrefix(r.URL.Path, "/ssh/authorized-keys/")
+	username := strings.Split(path, "/")[0]
+	if username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+
+	// Localhost-only protection
+	remoteIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		http.Error(w, "invalid remote address", http.StatusBadRequest)
+		return
+	}
+	if remoteIP != "127.0.0.1" && remoteIP != "::1" {
+		http.Error(w, "access denied", http.StatusForbidden)
+		return
+	}
+
+	// Get all devices from Alexandria
+	devices, err := s.getAlexandriaDevices()
+	if err != nil {
+		s.logger.Error("failed to get devices from Alexandria", "error", err)
+		http.Error(w, "failed to query device registry", http.StatusInternalServerError)
+		return
+	}
+
+	// Read authorized_keys file
+	authorizedKeysPath := strings.Replace(s.cfg.SSH.AuthorizedKeysPath, "{username}", username, 1)
+	file, err := os.Open(authorizedKeysPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Return empty response for non-existent file
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		s.logger.Error("failed to open authorized_keys file", "error", err, "path", authorizedKeysPath)
+		http.Error(w, "failed to read authorized keys", http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	// Build allowed fingerprints map
+	allowedFingerprints := make(map[string]bool)
+	for _, device := range devices {
+		if fingerprint, ok := device.Metadata["ssh_fingerprint"].(string); ok {
+			allowedFingerprints[fingerprint] = true
+		}
+	}
+
+	var allowedKeys []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		fingerprint, err := calculateSSHFingerprint(line)
+		if err != nil {
+			continue // Skip malformed keys
+		}
+
+		if allowedFingerprints[fingerprint] {
+			allowedKeys = append(allowedKeys, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		s.logger.Error("failed to read authorized_keys file", "error", err)
+		http.Error(w, "failed to read authorized keys", http.StatusInternalServerError)
+		return
+	}
+
+	// Return the allowed keys
+	w.Header().Set("Content-Type", "text/plain")
+	for _, key := range allowedKeys {
+		fmt.Fprintln(w, key)
+	}
+}
+
+// getAlexandriaDevices retrieves devices from Alexandria API.
+func (s *Server) getAlexandriaDevices() ([]AlexandriaDevice, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := s.cfg.SSH.AlexandriaURL + "/api/v1/devices"
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request devices: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("devices API returned status %d", resp.StatusCode)
+	}
+
+	var response AlexandriaDevicesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode devices response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
+// getAlexandriaPeople retrieves people from Alexandria API.
+func (s *Server) getAlexandriaPeople() ([]AlexandriaPerson, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	url := s.cfg.SSH.AlexandriaURL + "/api/v1/people"
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to request people: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("people API returned status %d", resp.StatusCode)
+	}
+
+	var response AlexandriaPeopleResponse
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode people response: %w", err)
+	}
+
+	return response.Data, nil
+}
+
+// getPublicKeyByFingerprint finds a public key by its fingerprint in authorized_keys.
+func (s *Server) getPublicKeyByFingerprint(username, fingerprint string) (string, error) {
+	authorizedKeysPath := strings.Replace(s.cfg.SSH.AuthorizedKeysPath, "{username}", username, 1)
+	file, err := os.Open(authorizedKeysPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open authorized_keys file: %w", err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		keyFingerprint, err := calculateSSHFingerprint(line)
+		if err != nil {
+			continue
+		}
+
+		if keyFingerprint == fingerprint {
+			return line, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("failed to read authorized_keys file: %w", err)
+	}
+
+	return "", fmt.Errorf("public key not found for fingerprint %s", fingerprint)
+}
+
+// calculateSSHFingerprint calculates the SSH fingerprint for a public key line.
+func calculateSSHFingerprint(keyLine string) (string, error) {
+	parts := strings.Split(keyLine, " ")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid public key format")
+	}
+
+	keyData, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("failed to decode public key: %w", err)
+	}
+
+	hash := sha256.Sum256(keyData)
+	return "SHA256:" + base64.StdEncoding.EncodeToString(hash[:]), nil
 }

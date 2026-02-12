@@ -278,6 +278,8 @@ func main() {
 		adminMux := http.NewServeMux()
 		adminMux.Handle("/metrics", metrics.Handler())
 		adminMux.Handle("/api/services", http.HandlerFunc(p.HandleServiceAPI))
+		// Mount SSH handler (without auth, localhost-only protected)
+		adminMux.Handle("/ssh/", adminSrv.SSHHandler())
 		adminMux.HandleFunc("/api/services/", p.HandleServiceAPI)
 		adminMux.Handle("/", adminSrv.Handler())
 
