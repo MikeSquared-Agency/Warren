@@ -136,10 +136,51 @@ services:
           memory: 1G
     environment:
       - OPENCLAW_GATEWAY_TOKEN=***REMOVED***
-      - GEMINI_API_KEY=***REMOVED***
+      - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
+      - ALEXANDRIA_URL=http://192.168.1.218:8500
+      - AGENT_ID=celebrimbor
       - OPENCLAW_GATEWAY_PORT=18791
-      - OPENCLAW_MODEL=google/gemini-2.0-flash
       - NODE_ENV=production
     volumes:
       - /home/mike/celebrimbor-data:/home/node/.openclaw
-    command: ["node", "/app/openclaw.mjs", "gateway", "--bind", "lan", "--port", "18791", "--allow-unconfigured"]
+    command: ["/bin/sh", "/home/node/.openclaw/pull-auth-entrypoint.sh"]
+
+  alexandria:
+    image: alexandria:latest
+    networks:
+      - agents
+    ports:
+      - "8500:8500"
+    deploy:
+      replicas: 0
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    environment:
+      - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
+      - NATS_URL=nats://warren_hermes:4222
+      - VAULT_ENCRYPTION_KEY=kai-alexandria-fernet-key-2026
+      - EMBEDDING_BACKEND=local
+      - EMBEDDING_SIDECAR_URL=http://warren_alexandria_embeddings:8501
+      - DATABASE_URL=postgresql://postgres:***REMOVED***@db.uaubofpmokvumbqpeymz.supabase.co:5432/postgres?sslmode=require&target_session_attrs=any
+
+  alexandria_embeddings:
+    image: alexandria-embeddings:latest
+    networks:
+      - agents
+    deploy:
+      replicas: 0
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
