@@ -1,91 +1,25 @@
-# Example Docker Swarm stack for Warren-managed agents.
-# Deploy with: docker stack deploy -c stack.yaml warren
-
 version: "3.8"
 
-# Encrypted overlay network for agent traffic.
-# Warren routes to agents over this network using Swarm DNS:
-#   http://tasks.<service-name>:<port>
-# No published ports needed — all traffic stays on the overlay.
 networks:
   agents:
     driver: overlay
     driver_opts:
       encrypted: "true"
 
-# External secrets — create before deploying:
-#   echo "secret-value" | docker secret create agent_api_key -
 secrets:
-  agent_api_key:
+  openclaw_gateway_token:
     external: true
 
+volumes:
+  hermes-data:
+
 services:
-  # Hermes — NATS message bus with JetStream for inter-agent communication.
-  hermes:
-    image: nats:latest
-    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+  lily:
+    image: openclaw-friend:latest
     networks:
       - agents
     ports:
-      - "4222:4222"   # NATS client (published for bare-metal orchestrator)
-      - "8222:8222"   # HTTP monitoring
-    volumes:
-      - hermes-data:/data
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 10
-        window: 120s
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-
-  # The Warren orchestrator itself.
-  orchestrator:
-    image: ghcr.io/your-org/warren:latest
-    networks:
-      - agents
-    ports:
-      - "8080:8080"
-    configs:
-      - source: orchestrator_config
-        target: /etc/warren/orchestrator.yaml
-    command: ["./orchestrator", "--config", "/etc/warren/orchestrator.yaml"]
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager  # needs access to Swarm API
-    volumes:
-      # Docker socket needs write access for Swarm service scaling (docker service update).
-      # Read-only mount would prevent Warren from starting/stopping agent containers.
-      # Security: access is limited to the overlay network; admin port is not publicly exposed.
-      # Consider using a Docker socket proxy (e.g., tecnativa/docker-socket-proxy) for
-      # fine-grained API access control in production.
-      - /var/run/docker.sock:/var/run/docker.sock
-
-  # Example always-on agent service.
-  # Swarm maintains exactly 1 replica and restarts on failure.
-  # Warren config backend: "http://tasks.warren_example-agent:8080"
-  example-agent:
-    image: ghcr.io/your-org/your-agent:latest
-    networks:
-      - agents
-    # No published ports — Warren proxies traffic via the overlay network.
-    # Reachable at: http://tasks.warren_example-agent:<port>
-
+      - "18790:18790"
     deploy:
       replicas: 1
       restart_policy:
@@ -100,29 +34,95 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512M
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-    secrets:
-      - agent_api_key
     environment:
-      - AGENT_NAME=example
+      - OPENCLAW_GATEWAY_TOKEN=password
+      - GEMINI_API_KEY=AIzaSyCMnoSY8R0Pn9Y6AWaJuJmi8ITXM8x5H3A
+      - OPENCLAW_GATEWAY_PORT=18790
+      - OPENCLAW_MODEL=google/gemini-2.0-flash
+      - OPENCLAW_PREFER_PNPM=1
+      - NODE_ENV=production
+    volumes:
+      - /home/mike/openclaw-friend/friend-openclaw-data:/home/node/.openclaw
+    command: ["node", "/app/openclaw.mjs", "gateway", "--bind", "lan", "--port", "18790", "--allow-unconfigured"]
 
-  # Example on-demand agent service.
-  # Warren scales this between 0 and 1 replicas.
-  # Warren config backend: "http://tasks.warren_on-demand-agent:8080"
-  on-demand-agent:
-    image: ghcr.io/your-org/your-on-demand-agent:latest
+  dutybound-mc:
+    image: dutybound-mc:latest
     networks:
       - agents
-
+    ports:
+      - "8081:8081"
     deploy:
-      replicas: 0  # Warren manages scaling
+      replicas: 0
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+    secrets:
+      - openclaw_gateway_token
+    volumes:
+      - /home/mike/MissionControl:/opt/mc
+
+  hermes:
+    image: nats:latest
+    networks:
+      - agents
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]
+    volumes:
+      - hermes-data:/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  promptforge:
+    image: promptforge:latest
+    networks:
+      - agents
+    ports:
+      - "8083:8083"
+    deploy:
+      replicas: 0
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    environment:
+      - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
+      - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
+      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
+      - PROMPT_FORGE_API_KEY=forge-api-868f36e0
+      - NATS_URL=nats://warren_hermes:4222
+
+  celebrimbor:
+    image: openclaw-friend:latest
+    networks:
+      - agents
+    ports:
+      - "18791:18791"
+    deploy:
+      replicas: 0
       restart_policy:
         condition: any
         delay: 5s
@@ -132,21 +132,12 @@ services:
         limits:
           cpus: "1.0"
           memory: 1G
-
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
     environment:
-      - AGENT_NAME=on-demand
-
-volumes:
-  hermes-data:
-    driver: local
-
-configs:
-  orchestrator_config:
-    file: ../configs/orchestrator.example.yaml
+      - OPENCLAW_GATEWAY_TOKEN=celebrimbor-forge-token
+      - GEMINI_API_KEY=AIzaSyCMnoSY8R0Pn9Y6AWaJuJmi8ITXM8x5H3A
+      - OPENCLAW_GATEWAY_PORT=18791
+      - OPENCLAW_MODEL=google/gemini-2.0-flash
+      - NODE_ENV=production
+    volumes:
+      - /home/mike/celebrimbor-data:/home/node/.openclaw
+    command: ["node", "/app/openclaw.mjs", "gateway", "--bind", "lan", "--port", "18791", "--allow-unconfigured"]
