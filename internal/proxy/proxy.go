@@ -224,7 +224,7 @@ func (p *Proxy) handleHealth(w http.ResponseWriter, b *Backend) {
 	}
 
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(healthResponse{
+	_ = json.NewEncoder(w).Encode(healthResponse{
 		Status: state,
 		Agent:  b.AgentName,
 	})

@@ -173,7 +173,7 @@ func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) addAgent(w http.ResponseWriter, r *http.Request) {
@@ -309,7 +309,7 @@ func (s *Server) addAgent(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "name": req.Name})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "name": req.Name})
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +355,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		if s.prxy != nil {
 			conns = s.prxy.WSCounter().Count(info.Hostname)
 		}
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name":           info.Name,
 			"hostname":       info.Hostname,
 			"policy":         info.Policy,
@@ -374,7 +374,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		od.Wake()
-		json.NewEncoder(w).Encode(map[string]string{"status": "waking"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "waking"})
 
 	case r.Method == http.MethodPost && action == "sleep":
 		od, ok := pol.(*policy.OnDemand)
@@ -383,7 +383,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		od.Sleep(r.Context())
-		json.NewEncoder(w).Encode(map[string]string{"status": "sleeping"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "sleeping"})
 
 	default:
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
@@ -423,7 +423,7 @@ func (s *Server) removeAgent(w http.ResponseWriter, name string) {
 	s.logger.Info("agent removed via API", "name", name)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
@@ -432,7 +432,7 @@ func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s.registry.List())
+	_ = json.NewEncoder(w).Encode(s.registry.List())
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -460,7 +460,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	serviceCount := len(s.registry.List())
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":          "ok",
 		"uptime_seconds":  time.Since(s.startAt).Seconds(),
 		"agent_count":     agentCount,
@@ -647,7 +647,7 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 			Reason:  "unregistered device",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 
 		// Log the denied request
 		s.logger.Info("SSH authorization denied", "username", req.Username, "fingerprint", req.Fingerprint, "reason", "unregistered device", "remote_ip", remoteIP)
@@ -693,7 +693,7 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 			Reason:  "public key not found",
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 
 		// Publish Hermes event for SSH denial
 		if s.hermes != nil {
@@ -720,7 +720,7 @@ func (s *Server) handleSSHAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 
 	// Log the successful authorization
 	s.logger.Info("SSH authorization successful", "username", req.Username, "fingerprint", req.Fingerprint, "device", matchedDevice.Identifier, "person", personName, "remote_ip", remoteIP)
