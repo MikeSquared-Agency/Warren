@@ -157,7 +157,7 @@ func agentListCmd() *cobra.Command {
 				State       string `json:"state"`
 				Connections int64  `json:"connections"`
 			}
-			_ = json.Unmarshal(data, &agents) //nolint:errcheck // non-JSON → empty table is fine
+			_ = json.Unmarshal(data, &agents)
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tHOSTNAME\tPOLICY\tSTATE\tCONNECTIONS")
 			for _, a := range agents {
@@ -353,7 +353,7 @@ func agentLogsCmd() *cobra.Command {
 			var info struct {
 				ContainerName string `json:"container_name"`
 			}
-			_ = json.Unmarshal(data, &info) //nolint:errcheck // falls back to args[0]
+			_ = json.Unmarshal(data, &info)
 			svcName := info.ContainerName
 			if svcName == "" {
 				svcName = args[0]
