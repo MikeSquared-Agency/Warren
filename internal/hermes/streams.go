@@ -1,6 +1,7 @@
 package hermes
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -39,13 +40,42 @@ var StreamConfigs = []jetstream.StreamConfig{
 		Replicas:    1,
 		Discard:     jetstream.DiscardOld,
 	},
+	{
+		Name:        "SLACK_EVENTS",
+		Description: "Slack message and reaction events from the forwarder",
+		Subjects:    []string{"swarm.slack.>"},
+		Retention:   jetstream.LimitsPolicy,
+		MaxAge:      14 * 24 * time.Hour, // 14 days
+		Storage:     jetstream.FileStorage,
+		Replicas:    1,
+		Discard:     jetstream.DiscardOld,
+	},
+}
+
+// KVBucketConfigs defines KeyValue buckets to provision.
+var KVBucketConfigs = []jetstream.KeyValueConfig{
+	{
+		Bucket:  "THREAD_OWNERSHIP",
+		TTL:     24 * time.Hour,
+		Storage: jetstream.MemoryStorage,
+	},
 }
 
 // ProvisionStreams creates or updates all JetStream streams.
 func ProvisionStreams(js jetstream.JetStream) error {
 	for _, cfg := range StreamConfigs {
-		if _, err := js.CreateOrUpdateStream(nil, cfg); err != nil {
+		if _, err := js.CreateOrUpdateStream(context.TODO(), cfg); err != nil {
 			return fmt.Errorf("provision stream %s: %w", cfg.Name, err)
+		}
+	}
+	return nil
+}
+
+// ProvisionKVBuckets creates all KeyValue buckets if they don't already exist.
+func ProvisionKVBuckets(js jetstream.JetStream) error {
+	for _, cfg := range KVBucketConfigs {
+		if _, err := js.CreateOrUpdateKeyValue(context.TODO(), cfg); err != nil {
+			return fmt.Errorf("provision KV bucket %s: %w", cfg.Bucket, err)
 		}
 	}
 	return nil

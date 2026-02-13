@@ -157,7 +157,7 @@ func agentListCmd() *cobra.Command {
 				State       string `json:"state"`
 				Connections int64  `json:"connections"`
 			}
-			json.Unmarshal(data, &agents)
+			_ = json.Unmarshal(data, &agents) //nolint:errcheck // non-JSON → empty table is fine
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "NAME\tHOSTNAME\tPOLICY\tSTATE\tCONNECTIONS")
 			for _, a := range agents {
@@ -296,7 +296,9 @@ func agentInspectCmd() *cobra.Command {
 				return nil
 			}
 			var info map[string]any
-			json.Unmarshal(data, &info)
+			if err := json.Unmarshal(data, &info); err != nil {
+				return fmt.Errorf("parse health info: %w", err)
+			}
 			for k, v := range info {
 				fmt.Printf("%-16s %v\n", k+":", v)
 			}
@@ -351,7 +353,7 @@ func agentLogsCmd() *cobra.Command {
 			var info struct {
 				ContainerName string `json:"container_name"`
 			}
-			json.Unmarshal(data, &info)
+			_ = json.Unmarshal(data, &info) //nolint:errcheck // falls back to args[0]
 			svcName := info.ContainerName
 			if svcName == "" {
 				svcName = args[0]
@@ -383,7 +385,7 @@ func serviceListCmd() *cobra.Command {
 				Target   string `json:"target"`
 				Agent    string `json:"agent"`
 			}
-			json.Unmarshal(data, &services)
+			_ = json.Unmarshal(data, &services)
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "HOSTNAME\tTARGET\tAGENT")
 			for _, s := range services {
@@ -458,7 +460,7 @@ func statusCmd() *cobra.Command {
 				WSConnections int64   `json:"ws_connections"`
 				ServiceCount  int     `json:"service_count"`
 			}
-			json.Unmarshal(data, &health)
+			_ = json.Unmarshal(data, &health)
 
 			uptime := time.Duration(health.UptimeSeconds) * time.Second
 			days := int(uptime.Hours()) / 24
@@ -619,7 +621,7 @@ func scaffoldCmd() *cobra.Command {
 				return err
 			}
 
-			dockerfile := fmt.Sprintf(`FROM ubuntu:22.04
+			dockerfile := `FROM ubuntu:22.04
 
 RUN apt-get update && apt-get install -y curl supervisor && rm -rf /var/lib/apt/lists/*
 
@@ -634,7 +636,7 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 EXPOSE 18790
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-`)
+`
 
 			openclawJSON := fmt.Sprintf(`{
   "name": "%s",
@@ -657,9 +659,15 @@ stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 `
 
-			os.WriteFile(dir+"/Dockerfile", []byte(dockerfile), 0644)
-			os.WriteFile(dir+"/openclaw.json", []byte(openclawJSON), 0644)
-			os.WriteFile(dir+"/supervisord.conf", []byte(supervisordConf), 0644)
+			if err := os.WriteFile(dir+"/Dockerfile", []byte(dockerfile), 0644); err != nil {
+				return err
+			}
+			if err := os.WriteFile(dir+"/openclaw.json", []byte(openclawJSON), 0644); err != nil {
+				return err
+			}
+			if err := os.WriteFile(dir+"/supervisord.conf", []byte(supervisordConf), 0644); err != nil {
+				return err
+			}
 
 			fmt.Printf("Scaffolded agent in ./%s/\n", name)
 			fmt.Println("\nNext steps:")

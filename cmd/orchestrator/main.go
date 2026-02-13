@@ -86,6 +86,12 @@ func main() {
 			logger.Error("failed to provision hermes streams", "error", err)
 			os.Exit(1)
 		}
+
+		// Provision KV buckets.
+		if err := hermesClient.ProvisionKVBuckets(ctx); err != nil {
+			logger.Error("failed to provision hermes KV buckets", "error", err)
+			os.Exit(1)
+		}
 		logger.Info("hermes connected and streams provisioned", "url", cfg.Hermes.URL)
 
 		// Bridge Warren events to Hermes.
@@ -289,7 +295,7 @@ func main() {
 				<-ctx.Done()
 				shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				srv.Shutdown(shutCtx)
+				_ = srv.Shutdown(shutCtx)
 			}()
 			logger.Info("admin server starting", "addr", cfg.AdminListen)
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
