@@ -21,3 +21,53 @@ jobs:
         run: go vet ./...
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build
+        run: go build -o ./bin/warren-server ./cmd/orchestrator/
+      - name: Write test config
+        run: |
+          cat > /tmp/warren-e2e.yaml << 'CONF'
+          listen: ":8080"
+          admin_listen: ":9090"
+          admin_token: "e2e-test-token"
+          hermes:
+            enabled: false
+          alexandria:
+            enabled: false
+          defaults:
+            health_check_interval: 30s
+          agents:
+            test-agent:
+              hostname: test.local
+              backend: "http://localhost:9999"
+              policy: unmanaged
+          CONF
+      - name: Start mock backend
+        run: |
+          python3 -c "
+          from http.server import HTTPServer, BaseHTTPRequestHandler
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200)
+                  self.end_headers()
+                  self.wfile.write(b'{\"ok\":true}')
+              def log_message(self, *a): pass
+          HTTPServer(('', 9999), H).serve_forever()
+          " &
+      - name: Start service
+        run: ./bin/warren-server --config /tmp/warren-e2e.yaml &
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9090/admin/health && exit 0 || sleep 1
+          done
+          exit 1
+      - name: Run E2E tests
+        run: bash scripts/e2e.sh
