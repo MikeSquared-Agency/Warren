@@ -86,6 +86,12 @@ func main() {
 			logger.Error("failed to provision hermes streams", "error", err)
 			os.Exit(1)
 		}
+
+		// Provision KV buckets.
+		if err := hermesClient.ProvisionKVBuckets(ctx); err != nil {
+			logger.Error("failed to provision hermes KV buckets", "error", err)
+			os.Exit(1)
+		}
 		logger.Info("hermes connected and streams provisioned", "url", cfg.Hermes.URL)
 
 		// Bridge Warren events to Hermes.

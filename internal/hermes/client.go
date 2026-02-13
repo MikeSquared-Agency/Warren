@@ -148,6 +148,16 @@ func (c *Client) ProvisionStreams(ctx context.Context) error {
 	return nil
 }
 
+// ProvisionKVBuckets creates all KeyValue buckets.
+func (c *Client) ProvisionKVBuckets(ctx context.Context) error {
+	for _, cfg := range KVBucketConfigs {
+		if _, err := c.js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
+			return fmt.Errorf("provision KV bucket %s: %w", cfg.Bucket, err)
+		}
+	}
+	return nil
+}
+
 // Close drains and closes the NATS connection.
 func (c *Client) Close() error {
 	if c.nc != nil {
