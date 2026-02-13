@@ -1,0 +1,17 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, openclaw]
+    steps:
+      - name: Pull latest
+        run: cd ~/Warren && git pull origin main
+
+      - name: Build binaries
+        run: cd ~/Warren && go build -o bin/warren-server ./cmd/orchestrator/ && go build -o bin/warren ./cmd/warren/
+
+      - name: Restart service
+        run: sudo systemctl restart warren.service
