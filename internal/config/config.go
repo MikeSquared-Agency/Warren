@@ -51,7 +51,12 @@ type Defaults struct {
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
 }
 
+type AgentHermes struct {
+	Enabled bool `yaml:"enabled"` // default: true
+}
+
 type Agent struct {
+	Hermes    AgentHermes `yaml:"hermes"`
 	Hostname  string   `yaml:"hostname"`
 	Hostnames []string `yaml:"hostnames"` // additional hostnames
 	Backend   string   `yaml:"backend"`
@@ -151,6 +156,10 @@ func applyDefaults(cfg *Config) {
 	}
 
 	for _, agent := range cfg.Agents {
+		// Default Hermes enabled=true for all agents
+		if !agent.Hermes.Enabled {
+			agent.Hermes.Enabled = true
+		}
 		if agent.Health.CheckInterval == 0 {
 			agent.Health.CheckInterval = cfg.Defaults.HealthCheckInterval
 		}

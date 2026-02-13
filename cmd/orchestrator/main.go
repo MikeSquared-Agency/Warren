@@ -62,7 +62,7 @@ func main() {
 		logger.Info("container discovery complete", "found", len(discovered))
 	}
 
-	serviceMgr := container.NewManager(docker, logger)
+	serviceMgr := container.NewManagerWithConfig(docker, logger, cfg, "/usr/local/shared-bin")
 	emitter := events.NewEmitter(logger)
 
 	// Connect to Hermes (NATS) if enabled.
