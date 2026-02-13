@@ -385,7 +385,7 @@ func serviceListCmd() *cobra.Command {
 				Target   string `json:"target"`
 				Agent    string `json:"agent"`
 			}
-			json.Unmarshal(data, &services)
+			_ = json.Unmarshal(data, &services)
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 			fmt.Fprintln(w, "HOSTNAME\tTARGET\tAGENT")
 			for _, s := range services {
@@ -460,7 +460,7 @@ func statusCmd() *cobra.Command {
 				WSConnections int64   `json:"ws_connections"`
 				ServiceCount  int     `json:"service_count"`
 			}
-			json.Unmarshal(data, &health)
+			_ = json.Unmarshal(data, &health)
 
 			uptime := time.Duration(health.UptimeSeconds) * time.Second
 			days := int(uptime.Hours()) / 24
