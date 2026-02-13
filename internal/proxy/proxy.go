@@ -113,7 +113,7 @@ func (p *Proxy) serveBackend(w http.ResponseWriter, r *http.Request, hostname st
 	if r.URL.Path == "/api/wake" && r.Method == http.MethodPost {
 		backend.Policy.OnRequest()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 		return
 	}
 
@@ -127,7 +127,7 @@ func (p *Proxy) serveBackend(w http.ResponseWriter, r *http.Request, hostname st
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Retry-After", "3")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(healthResponse{Status: state, Agent: backend.AgentName})
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: state, Agent: backend.AgentName})
 		return
 	}
 
@@ -168,7 +168,7 @@ func (p *Proxy) HandleServiceAPI(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/api/services":
-		json.NewEncoder(w).Encode(p.registry.List())
+		_ = json.NewEncoder(w).Encode(p.registry.List())
 
 	case r.Method == http.MethodPost && r.URL.Path == "/api/services":
 		// Limit request body to 1MB to prevent memory exhaustion.
@@ -191,7 +191,7 @@ func (p *Proxy) HandleServiceAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/services/"):
 		hostname := strings.TrimPrefix(r.URL.Path, "/api/services/")
@@ -200,7 +200,7 @@ func (p *Proxy) HandleServiceAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.registry.Deregister(hostname)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 
 	default:
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
@@ -224,7 +224,7 @@ func (p *Proxy) handleHealth(w http.ResponseWriter, b *Backend) {
 	}
 
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(healthResponse{
+	_ = json.NewEncoder(w).Encode(healthResponse{
 		Status: state,
 		Agent:  b.AgentName,
 	})

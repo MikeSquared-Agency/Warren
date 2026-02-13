@@ -23,7 +23,6 @@ type WSCounter struct {
 	counts sync.Map  // hostname → *int64
 	total  int64     // total across all hostnames
 	done   chan struct{}
-	mu     sync.Mutex
 }
 
 func NewWSCounter() *WSCounter {
@@ -92,12 +91,12 @@ type deadlineConn struct {
 }
 
 func (dc *deadlineConn) Read(p []byte) (int, error) {
-	dc.Conn.SetReadDeadline(time.Now().Add(dc.deadline))
+	_ = dc.Conn.SetReadDeadline(time.Now().Add(dc.deadline))
 	return dc.Conn.Read(p)
 }
 
 func (dc *deadlineConn) Write(p []byte) (int, error) {
-	dc.Conn.SetWriteDeadline(time.Now().Add(dc.deadline))
+	_ = dc.Conn.SetWriteDeadline(time.Now().Add(dc.deadline))
 	return dc.Conn.Write(p)
 }
 
