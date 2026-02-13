@@ -221,6 +221,7 @@ services:
     - DISPATCH_FORGE_URL=http://warren_promptforge:8083
     - DISPATCH_ALEXANDRIA_URL=http://warren_alexandria:8500
     - DISPATCH_TICK_INTERVAL_MS=5000
+    - DISPATCH_OWNER_FILTER_ENABLED=false
   scout:
     image: openclaw-friend:latest
     networks:
