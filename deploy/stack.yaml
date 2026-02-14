@@ -1,21 +1,229 @@
 version: '3.8'
+
 networks:
   agents:
     driver: overlay
     driver_opts:
       encrypted: 'true'
+
 secrets:
-  openclaw_gateway_token:
+  alexandria_database_url:
     external: true
+  alexandria_encryption_key:
+    external: true
+
 volumes:
-  hermes-data: null
+  hermes-data:
+
 services:
+
+  # ──────────────────────────────────────────────
+  # Core Infrastructure
+  # ──────────────────────────────────────────────
+
+  hermes:
+    image: nats:latest
+    networks:
+    - agents
+    command:
+    - --jetstream
+    - --store_dir
+    - /data
+    - --http_port
+    - '8222'
+    - --auth
+    - 58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f
+    volumes:
+    - hermes-data:/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  alexandria:
+    image: alexandria:latest
+    networks:
+    - agents
+    ports:
+    - target: 8500
+      published: 8500
+      protocol: tcp
+      mode: host
+    secrets:
+    - alexandria_database_url
+    - alexandria_encryption_key
+    entrypoint: ["sh", "-c"]
+    command:
+    - >-
+      export DATABASE_URL="$$(cat /run/secrets/alexandria_database_url)" &&
+      export ENCRYPTION_KEY="$$(cat /run/secrets/alexandria_encryption_key)" &&
+      exec /alexandria
+    environment:
+    - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
+    - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+    - EMBEDDING_BACKEND=local
+    - EMBEDDING_SIDECAR_URL=http://warren_alexandria_embeddings:8501
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
+  alexandria_embeddings:
+    image: alexandria-embeddings:latest
+    networks:
+    - agents
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+
+  # ──────────────────────────────────────────────
+  # Internal Services (vault-entrypoint, no ports)
+  # ──────────────────────────────────────────────
+
+  dispatch:
+    image: dispatch:latest
+    networks:
+    - agents
+    entrypoint: ["/vault-entrypoint.sh"]
+    command: ["dispatch"]
+    volumes:
+    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    environment:
+    - VAULT_AGENT_ID=dispatch
+    - VAULT_SECRETS=supabase_db_url:DISPATCH_DATABASE_URL
+    - DISPATCH_PORT=8600
+    - DISPATCH_METRICS_PORT=8601
+    - DISPATCH_ADMIN_TOKEN=e25937ae02f5460abd9c9a55cbb5e9778cb396cf01306429e2579ecca273d065
+    - DISPATCH_HERMES_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+    - DISPATCH_WARREN_URL=http://192.168.1.218:9090
+    - DISPATCH_WARREN_TOKEN=c1efd0a470ad5567a653d5d587c53f6c43e52c1419a5dc2c2ecfbbd5c040b276
+    - DISPATCH_FORGE_URL=http://warren_promptforge:8083
+    - DISPATCH_ALEXANDRIA_URL=http://warren_alexandria:8500
+    - DISPATCH_TICK_INTERVAL_MS=5000
+    - DISPATCH_OWNER_FILTER_ENABLED=false
+
+  chronicle:
+    image: chronicle:latest
+    networks:
+    - agents
+    entrypoint: ["/vault-entrypoint.sh"]
+    command: ["chronicle"]
+    volumes:
+    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    environment:
+    - VAULT_AGENT_ID=chronicle
+    - VAULT_SECRETS=supabase_db_url:DATABASE_URL
+    - CHRONICLE_PORT=8700
+    - BATCH_FLUSH_INTERVAL_MS=5000
+    - BATCH_FLUSH_THRESHOLD=100
+    - LOG_LEVEL=info
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+
+  promptforge:
+    image: promptforge:latest
+    networks:
+    - agents
+    entrypoint: ["/vault-entrypoint.sh"]
+    command: ["uvicorn", "prompt_forge.main:app", "--host", "0.0.0.0", "--port", "8083"]
+    volumes:
+    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    environment:
+    - VAULT_AGENT_ID=promptforge
+    - VAULT_SECRETS=supabase_url:SUPABASE_URL,supabase_service_role_key:SUPABASE_KEY,supabase_service_role_key:SUPABASE_SERVICE_ROLE_KEY
+    - PROMPT_FORGE_API_KEY=b01148d4ac474db310ae509fb3f59c1d7322cb9d94cc3288f011011b8fdf0a0d
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+
+  slack-forwarder:
+    image: slack-forwarder:latest
+    networks:
+    - agents
+    entrypoint: ["/vault-entrypoint.sh"]
+    command: ["slack-forwarder"]
+    volumes:
+    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    environment:
+    - VAULT_AGENT_ID=slack-forwarder
+    - VAULT_SECRETS=slack_app_token:SLACK_APP_TOKEN,slack_bot_token:SLACK_BOT_TOKEN
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+    - LISTEN_ADDR=:8750
+    - AGENT_BOT_MAP={}
+
+  # ──────────────────────────────────────────────
+  # Agent Services (openclaw-friend, host-mode ports)
+  # ──────────────────────────────────────────────
+
   lily:
     image: openclaw-friend:latest
     networks:
     - agents
     ports:
-    - 18790:18790
+    - target: 18790
+      published: 18790
+      mode: host
     deploy:
       replicas: 1
       restart_policy:
@@ -31,14 +239,13 @@ services:
           cpus: '0.5'
           memory: 512M
     environment:
-    - OPENCLAW_GATEWAY_TOKEN=password
+    - OPENCLAW_GATEWAY_TOKEN=5e45197c3ea4e6362f9d6276952d2a5ba24f6f80db04054b32c0527e2043d38c
     - FORGE_URL=http://warren_promptforge:8083
     - SOUL_SLUG=lily
-    - GEMINI_API_KEY=***REMOVED***
-    - OPENAI_API_KEY=unused
+    - ALEXANDRIA_URL=http://warren_alexandria:8500
     - OPENCLAW_GATEWAY_PORT=18790
     - OPENCLAW_MODEL=openai-codex/gpt-5.3-codex
-    - NATS_URL=nats://warren_hermes:4222
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - AGENT_ID=lily
     - OPENCLAW_PREFER_PNPM=1
     - NODE_ENV=production
@@ -48,6 +255,46 @@ services:
     command:
     - /bin/sh
     - /home/node/.openclaw/pull-soul-entrypoint.sh
+
+  scout:
+    image: openclaw-friend:latest
+    networks:
+    - agents
+    ports:
+    - target: 18792
+      published: 18792
+      mode: host
+    deploy:
+      replicas: 0
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    environment:
+    - OPENCLAW_GATEWAY_TOKEN=44a804c037a062c23d647745ccf3c1884fd8067c36e014be9f50c35d68d91636
+    - FORGE_URL=http://warren_promptforge:8083
+    - SOUL_SLUG=scout
+    - ALEXANDRIA_URL=http://warren_alexandria:8500
+    - OPENCLAW_GATEWAY_PORT=18792
+    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+    - AGENT_ID=scout
+    - NODE_ENV=production
+    volumes:
+    - /home/mike/scout-data:/home/node/.openclaw
+    - /home/mike/shared-bin:/usr/local/shared-bin:ro
+    command:
+    - /bin/sh
+    - /home/node/.openclaw/pull-soul-entrypoint.sh
+
   dutybound-mc:
     image: openclaw-friend:latest
     networks:
@@ -71,12 +318,12 @@ services:
           cpus: '0.5'
           memory: 512M
     environment:
-    - OPENCLAW_GATEWAY_TOKEN=dutybound-gateway-868f36e0
+    - OPENCLAW_GATEWAY_TOKEN=3a17a709d0e6cfcc212b921b2a0916d62a7b6f1d5fe5b8298d6b7995af428a1e
     - OPENCLAW_GATEWAY_PORT=18793
     - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
     - AGENT_ID=dutybound
     - SOUL_SLUG=dutybound
-    - NATS_URL=nats://warren_hermes:4222
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - FORGE_URL=http://warren_promptforge:8083
     - NODE_ENV=production
     volumes:
@@ -87,60 +334,15 @@ services:
     command:
     - /bin/sh
     - /home/node/.openclaw/pull-soul-entrypoint.sh
-  hermes:
-    image: nats:latest
-    networks:
-    - agents
-    ports:
-    - 4222:4222
-    - 8222:8222
-    command:
-    - --jetstream
-    - --store_dir
-    - /data
-    - --http_port
-    - '8222'
-    volumes:
-    - hermes-data:/data
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 10
-        window: 120s
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-  promptforge:
-    image: promptforge:latest
-    networks:
-    - agents
-    ports:
-    - 8083:8083
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 5
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-    environment:
-    - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
-    - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
-    - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
-    - PROMPT_FORGE_API_KEY=***REMOVED***
-    - NATS_URL=nats://warren_hermes:4222
+
   celebrimbor:
     image: openclaw-friend:latest
     networks:
     - agents
     ports:
-    - 18791:18791
+    - target: 18791
+      published: 18791
+      mode: host
     deploy:
       replicas: 0
       restart_policy:
@@ -153,11 +355,11 @@ services:
           cpus: '1.0'
           memory: 2G
     environment:
-    - OPENCLAW_GATEWAY_TOKEN=***REMOVED***
+    - OPENCLAW_GATEWAY_TOKEN=0eeae1901c720a8b79e11a2d05dd6dd6cd4970b9a0471e30b0273fe65bea92e8
     - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
-    - ALEXANDRIA_URL=http://192.168.1.218:8500
+    - ALEXANDRIA_URL=http://warren_alexandria:8500
     - AGENT_ID=celebrimbor
-    - NATS_URL=nats://warren_hermes:4222
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - OPENCLAW_GATEWAY_PORT=18791
     - NODE_ENV=production
     volumes:
@@ -166,110 +368,3 @@ services:
     command:
     - /bin/sh
     - /home/node/.openclaw/pull-auth-entrypoint.sh
-  alexandria:
-    image: alexandria:latest
-    networks:
-    - agents
-    ports:
-    - target: 8500
-      published: 8500
-      protocol: tcp
-      mode: host
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 5
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-    environment:
-    - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
-    - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
-    - NATS_URL=nats://warren_hermes:4222
-    - ENCRYPTION_KEY=myU3s2rP9Z4u6RM-IeL8kCoLkDOEdTJdfaCYU56dfhs=
-    - EMBEDDING_BACKEND=local
-    - EMBEDDING_SIDECAR_URL=http://warren_alexandria_embeddings:8501
-    - DATABASE_URL=postgresql://postgres.uaubofpmokvumbqpeymz:***REMOVED***@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
-  alexandria_embeddings:
-    image: alexandria-embeddings:latest
-    networks:
-    - agents
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 5
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-  dispatch:
-    image: dispatch:latest
-    networks:
-    - agents
-    ports:
-    - 8600:8600
-    - 8601:8601
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 10
-        window: 120s
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256M
-    environment:
-    - DISPATCH_PORT=8600
-    - DISPATCH_METRICS_PORT=8601
-    - DISPATCH_ADMIN_TOKEN=***REMOVED***
-    - DISPATCH_DATABASE_URL=postgresql://postgres.uaubofpmokvumbqpeymz:***REMOVED***@aws-1-eu-central-1.pooler.supabase.com:5432/postgres
-    - DISPATCH_HERMES_URL=nats://warren_hermes:4222
-    - DISPATCH_WARREN_URL=http://192.168.1.218:9090
-    - DISPATCH_WARREN_TOKEN=***REMOVED***
-    - DISPATCH_FORGE_URL=http://warren_promptforge:8083
-    - DISPATCH_ALEXANDRIA_URL=http://warren_alexandria:8500
-    - DISPATCH_TICK_INTERVAL_MS=5000
-    - DISPATCH_OWNER_FILTER_ENABLED=false
-  scout:
-    image: openclaw-friend:latest
-    networks:
-    - agents
-    ports:
-    - 18792:18792
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 10
-        window: 120s
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    environment:
-    - OPENCLAW_GATEWAY_TOKEN=***REMOVED***
-    - FORGE_URL=http://warren_promptforge:8083
-    - SOUL_SLUG=scout
-    - ALEXANDRIA_URL=http://warren_alexandria:8500
-    - OPENCLAW_GATEWAY_PORT=18792
-    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
-    - NATS_URL=nats://warren_hermes:4222
-    - AGENT_ID=scout
-    - NODE_ENV=production
-    volumes:
-    - /home/mike/scout-data:/home/node/.openclaw
-    - /home/mike/shared-bin:/usr/local/shared-bin:ro
-    command:
-    - /bin/sh
-    - /home/node/.openclaw/pull-soul-entrypoint.sh
