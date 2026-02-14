@@ -29,10 +29,15 @@ const (
 	SubjectSSHAuthorized = "swarm.system.ssh.authorized"
 	SubjectSSHDenied     = "swarm.system.ssh.denied"
 
+	// Claude Code session subjects.
+	SubjectCCSessionCompleted = "swarm.cc.session.completed"
+	SubjectCCSessionFailed    = "swarm.cc.session.failed"
+
 	// Wildcard patterns for subscriptions.
 	SubjectAllAgents = "swarm.agent.>"
 	SubjectAllTasks  = "swarm.task.>"
 	SubjectAllSystem = "swarm.system.>"
+	SubjectAllCC     = "swarm.cc.>"
 	SubjectAll       = "swarm.>"
 )
 

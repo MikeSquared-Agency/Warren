@@ -49,6 +49,7 @@ func testServer(t *testing.T) (*Server, string) {
 		tmpFile.Name(),
 		func() int64 { return 0 },
 		nil, // no hermes client in tests
+		nil, // no process tracker in tests
 		logger,
 	)
 	return srv, tmpFile.Name()
