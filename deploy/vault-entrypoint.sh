@@ -44,13 +44,12 @@ fi
 echo "[vault-entrypoint] Agent: $VAULT_AGENT_ID"
 echo "[vault-entrypoint] Waiting for Alexandria at $VAULT_URL ..."
 
-# Wait for Alexandria to be reachable
+# Wait for Alexandria to be reachable (retries indefinitely)
 elapsed=0
 while ! http_check "$VAULT_URL/api/v1/secrets"; do
   elapsed=$((elapsed + 2))
-  if [ "$elapsed" -ge "$VAULT_TIMEOUT" ]; then
-    echo "[vault-entrypoint] ERROR: Alexandria not reachable after ${VAULT_TIMEOUT}s"
-    exit 1
+  if [ "$((elapsed % 30))" -eq 0 ]; then
+    echo "[vault-entrypoint] Still waiting for Alexandria (${elapsed}s elapsed)..."
   fi
   sleep 2
 done
