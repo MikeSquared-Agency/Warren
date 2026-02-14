@@ -11,6 +11,7 @@ type Config struct {
 	Listen         string            `yaml:"listen"`
 	AdminListen    string            `yaml:"admin_listen"` // e.g. ":9090", empty = disabled
 	AdminToken     string            `yaml:"admin_token"`  // bearer token for admin API auth
+	ProxyToken     string            `yaml:"proxy_token"`  // bearer token for proxy port auth
 	Defaults       Defaults          `yaml:"defaults"`
 	Agents         map[string]*Agent `yaml:"agents"`
 	Webhooks       []WebhookConfig   `yaml:"webhooks"`

@@ -15,7 +15,7 @@ import (
 func TestDeregister(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	registry := services.NewRegistry(logger)
-	p := New(registry, logger)
+	p := New(registry, "", logger)
 
 	target, _ := url.Parse("http://localhost:9999")
 	pol := policy.NewUnmanaged()

@@ -159,7 +159,7 @@ func main() {
 			registry.DeregisterByAgent(ev.Agent)
 		}
 	})
-	p := proxy.New(registry, logger)
+	p := proxy.New(registry, cfg.ProxyToken, logger)
 	policyByName := make(map[string]policy.Policy)
 	policyCancels := make(map[string]context.CancelFunc)
 

@@ -19,7 +19,7 @@ func testServerWithToken(t *testing.T, token string) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	emitter := events.NewEmitter(logger)
 	registry := services.NewRegistry(logger)
-	p := proxy.New(registry, logger)
+	p := proxy.New(registry, "", logger)
 
 	tmpFile, err := os.CreateTemp("", "warren-test-*.yaml")
 	if err != nil {

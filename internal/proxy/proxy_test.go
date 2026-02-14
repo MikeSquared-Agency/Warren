@@ -31,7 +31,7 @@ func testLogger() *slog.Logger {
 func setupProxy(t *testing.T, backends map[string]*mockBackendInfo) *Proxy {
 	t.Helper()
 	registry := services.NewRegistry(testLogger())
-	p := New(registry, testLogger())
+	p := New(registry, "", testLogger())
 	for hostname, info := range backends {
 		u, _ := url.Parse(info.server.URL)
 		p.Register(hostname, info.agentName, u, info.policy)
@@ -189,7 +189,7 @@ func TestServiceRegistryFallback(t *testing.T) {
 	defer backend.Close()
 
 	registry := services.NewRegistry(testLogger())
-	p := New(registry, testLogger())
+	p := New(registry, "", testLogger())
 	// Register directly (bypassing validation) since test backend is on localhost.
 	registry.RegisterUnsafe("dynamic.com", backend.URL, "agent-x")
 
@@ -205,7 +205,7 @@ func TestServiceRegistryFallback(t *testing.T) {
 
 func TestServiceAPIRegisterAndList(t *testing.T) {
 	registry := services.NewRegistry(testLogger())
-	p := New(registry, testLogger())
+	p := New(registry, "", testLogger())
 
 	// Register via admin API handler (no longer on public port)
 	body := strings.NewReader(`{"hostname":"x.com","target":"http://localhost:1234","agent":"a"}`)
@@ -227,7 +227,7 @@ func TestServiceAPIRegisterAndList(t *testing.T) {
 
 func TestServiceAPINotOnPublicPort(t *testing.T) {
 	registry := services.NewRegistry(testLogger())
-	p := New(registry, testLogger())
+	p := New(registry, "", testLogger())
 
 	req := httptest.NewRequest("GET", "/api/services", nil)
 	req.Host = "any.com"
@@ -235,5 +235,106 @@ func TestServiceAPINotOnPublicPort(t *testing.T) {
 	p.ServeHTTP(w, req)
 	if w.Code != 404 {
 		t.Errorf("public /api/services status = %d, want 404", w.Code)
+	}
+}
+
+func setupProxyWithAuth(t *testing.T, authToken string, backends map[string]*mockBackendInfo) *Proxy {
+	t.Helper()
+	registry := services.NewRegistry(testLogger())
+	p := New(registry, authToken, testLogger())
+	for hostname, info := range backends {
+		u, _ := url.Parse(info.server.URL)
+		p.Register(hostname, info.agentName, u, info.policy)
+	}
+	return p
+}
+
+func TestProxyAuth_HealthBypassesAuth(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer s.Close()
+	p := setupProxyWithAuth(t, "secret-token", map[string]*mockBackendInfo{
+		"a.com": {server: s, agentName: "agent-a", policy: &mockPolicy{state: "ready"}},
+	})
+
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	req.Host = "a.com"
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestProxyAuth_WakeRequiresAuth(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer s.Close()
+	p := setupProxyWithAuth(t, "secret-token", map[string]*mockBackendInfo{
+		"a.com": {server: s, agentName: "a", policy: &mockPolicy{state: "sleeping"}},
+	})
+
+	req := httptest.NewRequest("POST", "/api/wake", nil)
+	req.Host = "a.com"
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestProxyAuth_ValidToken(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer s.Close()
+	pol := &mockPolicy{state: "sleeping"}
+	p := setupProxyWithAuth(t, "secret-token", map[string]*mockBackendInfo{
+		"a.com": {server: s, agentName: "a", policy: pol},
+	})
+
+	req := httptest.NewRequest("POST", "/api/wake", nil)
+	req.Host = "a.com"
+	req.Header.Set("Authorization", "Bearer secret-token")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if !pol.woken {
+		t.Error("expected OnRequest to be called")
+	}
+}
+
+func TestProxyAuth_InvalidToken(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer s.Close()
+	p := setupProxyWithAuth(t, "secret-token", map[string]*mockBackendInfo{
+		"a.com": {server: s, agentName: "a", policy: &mockPolicy{state: "sleeping"}},
+	})
+
+	req := httptest.NewRequest("POST", "/api/wake", nil)
+	req.Host = "a.com"
+	req.Header.Set("Authorization", "Bearer wrong-token")
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 401 {
+		t.Errorf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestProxyAuth_NoTokenConfigured(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer s.Close()
+	pol := &mockPolicy{state: "sleeping"}
+	p := setupProxyWithAuth(t, "", map[string]*mockBackendInfo{
+		"a.com": {server: s, agentName: "a", policy: pol},
+	})
+
+	req := httptest.NewRequest("POST", "/api/wake", nil)
+	req.Host = "a.com"
+	w := httptest.NewRecorder()
+	p.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if !pol.woken {
+		t.Error("expected OnRequest to be called")
 	}
 }

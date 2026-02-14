@@ -38,7 +38,7 @@ func TestIntegrationFullProxySetup(t *testing.T) {
 	defer backend2.Close()
 
 	registry := services.NewRegistry(logger)
-	p := New(registry, logger)
+	p := New(registry, "", logger)
 
 	u1, _ := url.Parse(backend1.URL)
 	u2, _ := url.Parse(backend2.URL)
@@ -99,7 +99,7 @@ func TestIntegrationDynamicServiceRouting(t *testing.T) {
 	defer dynamicBackend.Close()
 
 	registry := services.NewRegistry(logger)
-	p := New(registry, logger)
+	p := New(registry, "", logger)
 	proxyServer := httptest.NewServer(p)
 	defer proxyServer.Close()
 
@@ -139,7 +139,7 @@ func TestIntegration503DuringStarting(t *testing.T) {
 	defer backend.Close()
 
 	registry := services.NewRegistry(logger)
-	p := New(registry, logger)
+	p := New(registry, "", logger)
 
 	u, _ := url.Parse(backend.URL)
 	pol := &integPolicy{state: "starting"}

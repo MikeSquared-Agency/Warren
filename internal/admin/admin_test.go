@@ -21,7 +21,7 @@ func testServer(t *testing.T) (*Server, string) {
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	emitter := events.NewEmitter(logger)
 	registry := services.NewRegistry(logger)
-	p := proxy.New(registry, logger)
+	p := proxy.New(registry, "", logger)
 
 	// Create temp config file.
 	tmpFile, err := os.CreateTemp("", "warren-test-*.yaml")
