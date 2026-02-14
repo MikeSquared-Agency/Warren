@@ -57,7 +57,7 @@ func main() {
 	serviceMgr := container.NewServiceManager(docker, logger)
 
 	// Build proxy and policies.
-	p := proxy.New(logger)
+	p := proxy.New(cfg.BearerToken, logger)
 	var policies []policy.Policy
 
 	for name, agent := range cfg.Agents {

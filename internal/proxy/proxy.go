@@ -19,18 +19,20 @@ type Backend struct {
 }
 
 type Proxy struct {
-	backends map[string]*Backend // hostname → backend
-	activity *ActivityTracker
-	ws       *WSCounter
-	logger   *slog.Logger
+	backends   map[string]*Backend // hostname → backend
+	activity   *ActivityTracker
+	ws         *WSCounter
+	authToken  string
+	logger     *slog.Logger
 }
 
-func New(logger *slog.Logger) *Proxy {
+func New(authToken string, logger *slog.Logger) *Proxy {
 	return &Proxy{
-		backends: make(map[string]*Backend),
-		activity: NewActivityTracker(),
-		ws:       NewWSCounter(),
-		logger:   logger,
+		backends:  make(map[string]*Backend),
+		activity:  NewActivityTracker(),
+		ws:        NewWSCounter(),
+		authToken: authToken,
+		logger:    logger,
 	}
 }
 
@@ -70,10 +72,18 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Health endpoint — return agent status.
+	// Health endpoint — return agent status (no auth required).
 	if r.URL.Path == "/api/health" && r.Method == http.MethodGet {
 		p.handleHealth(w, backend)
 		return
+	}
+
+	// All other endpoints require auth.
+	if p.authToken != "" {
+		if r.Header.Get("Authorization") != "Bearer "+p.authToken {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
 	}
 
 	// Wake endpoint — trigger on-demand start.

@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Listen   string            `yaml:"listen"`
-	Defaults Defaults          `yaml:"defaults"`
-	Agents   map[string]*Agent `yaml:"agents"`
+	Listen      string            `yaml:"listen"`
+	BearerToken string            `yaml:"bearer_token"`
+	Defaults    Defaults          `yaml:"defaults"`
+	Agents      map[string]*Agent `yaml:"agents"`
 }
 
 type Defaults struct {
