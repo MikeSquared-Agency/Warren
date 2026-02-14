@@ -191,52 +191,128 @@ else
 fi
 
 # =========================================================================
-# Test 4: Timeout when Alexandria is unreachable
+# Test 4: Retry-forever when Alexandria is unreachable
 # =========================================================================
-echo "[test] Timeout when Alexandria unreachable"
-# Use VAULT_TIMEOUT=4 so the script sleeps at least once (sleep 2) before
-# the elapsed counter (incremented by 2 each loop) hits the threshold.
-# This gives us a measurable wall-clock window (2-15s).
-START_NS=$(date +%s%N 2>/dev/null || echo "0")
-EXIT_CODE=0
-OUTPUT=$(env -i PATH="$PATH" HOME="$HOME" \
-  VAULT_AGENT_ID="test-agent" \
-  VAULT_SECRETS="foo:BAR" \
-  VAULT_URL="http://127.0.0.1:19999" \
-  VAULT_TIMEOUT="4" \
-  sh "$ENTRYPOINT" echo hello 2>&1 || true)
-END_NS=$(date +%s%N 2>/dev/null || echo "0")
+echo "[test] Retry-forever when Alexandria unreachable"
+# The entrypoint should NOT exit when Alexandria is down — it retries
+# indefinitely. We run it in the background for a few seconds, verify it's
+# still alive and logging "Still waiting" messages, then kill it.
 
-if echo "$OUTPUT" | grep -q "Alexandria not reachable after 4s"; then
-  pass "timeout produces correct error message"
-else
-  fail "timeout did not produce expected error message"
-fi
+RETRY_LOG="$TMPDIR/retry_output.log"
 
-EXIT_CODE=0
 env -i PATH="$PATH" HOME="$HOME" \
   VAULT_AGENT_ID="test-agent" \
   VAULT_SECRETS="foo:BAR" \
   VAULT_URL="http://127.0.0.1:19999" \
-  VAULT_TIMEOUT="4" \
-  sh "$ENTRYPOINT" echo hello >/dev/null 2>&1 || EXIT_CODE=$?
+  VAULT_TIMEOUT="60" \
+  sh "$ENTRYPOINT" echo hello >"$RETRY_LOG" 2>&1 &
+RETRY_PID=$!
 
-if [ "$EXIT_CODE" -ne 0 ]; then
-  pass "timeout exits non-zero (exit=$EXIT_CODE)"
+# Let it run for 8 seconds (enough for 4 loop iterations at sleep 2)
+sleep 8
+
+if kill -0 "$RETRY_PID" 2>/dev/null; then
+  pass "entrypoint still running after 8s (no premature exit)"
+  kill "$RETRY_PID" 2>/dev/null || true
+  wait "$RETRY_PID" 2>/dev/null || true
 else
-  fail "timeout should exit non-zero"
+  wait "$RETRY_PID" 2>/dev/null || true
+  fail "entrypoint exited prematurely (should retry forever)"
 fi
 
-# Check wall-clock duration if nanosecond timestamps are available
-if [ "$START_NS" != "0" ] && [ "$END_NS" != "0" ]; then
-  ELAPSED_MS=$(( (END_NS - START_NS) / 1000000 ))
-  if [ "$ELAPSED_MS" -ge 1500 ] && [ "$ELAPSED_MS" -le 20000 ]; then
-    pass "timeout duration reasonable (${ELAPSED_MS}ms with VAULT_TIMEOUT=4)"
-  else
-    fail "timeout duration unexpected (${ELAPSED_MS}ms, expected 1500-20000ms)"
-  fi
+RETRY_OUTPUT=$(cat "$RETRY_LOG")
+
+if echo "$RETRY_OUTPUT" | grep -q "Waiting for Alexandria"; then
+  pass "initial waiting message logged"
 else
-  pass "timeout duration check skipped (nanosecond timestamps unavailable)"
+  fail "initial waiting message not logged"
+fi
+
+# Verify no fatal error/exit message
+if echo "$RETRY_OUTPUT" | grep -q "ERROR.*not reachable"; then
+  fail "should not produce fatal timeout error"
+else
+  pass "no fatal timeout error produced"
+fi
+
+# =========================================================================
+# Test 4b: "Still waiting" progress message appears at 30s intervals
+# =========================================================================
+echo "[test] Still-waiting progress logging"
+# We can't wait 30s in a unit test, so test the logic by checking the
+# script source for the modulo-30 condition.
+if grep -q 'elapsed % 30' "$ENTRYPOINT"; then
+  pass "entrypoint logs progress every 30s (modulo check present)"
+else
+  fail "entrypoint missing 30s progress logging"
+fi
+
+# Verify the log message format
+if grep -q 'Still waiting for Alexandria' "$ENTRYPOINT"; then
+  pass "progress message uses expected format"
+else
+  fail "progress message format unexpected"
+fi
+
+# =========================================================================
+# Test 4c: Entrypoint connects once Alexandria appears (delayed start)
+# =========================================================================
+echo "[test] Delayed Alexandria start — entrypoint eventually connects"
+MOCK_PORT=$(pick_port)
+
+cat > "$TMPDIR/delayed_secret.json" <<'EOF'
+{
+  "dummy_key": "delayed_value"
+}
+EOF
+
+DELAYED_LOG="$TMPDIR/delayed_output.log"
+
+# Start entrypoint BEFORE mock server — it should wait
+env -i PATH="$PATH" HOME="$HOME" \
+  VAULT_AGENT_ID="test-agent" \
+  VAULT_SECRETS="dummy_key:DELAYED_VAR" \
+  VAULT_URL="http://127.0.0.1:${MOCK_PORT}" \
+  VAULT_TIMEOUT="60" \
+  sh "$ENTRYPOINT" echo "DELAYED_SUCCESS" >"$DELAYED_LOG" 2>&1 &
+DELAYED_PID=$!
+
+# Wait 4s then start mock server
+sleep 4
+start_mock_server "$MOCK_PORT" "$TMPDIR/delayed_secret.json"
+
+# Give entrypoint time to detect the server and fetch secrets
+WAIT_TRIES=0
+while kill -0 "$DELAYED_PID" 2>/dev/null && [ "$WAIT_TRIES" -lt 15 ]; do
+  WAIT_TRIES=$((WAIT_TRIES + 1))
+  sleep 1
+done
+
+DELAYED_OUTPUT=$(cat "$DELAYED_LOG")
+kill_mock_server
+
+if echo "$DELAYED_OUTPUT" | grep -q "Alexandria is up"; then
+  pass "entrypoint detected delayed Alexandria start"
+else
+  fail "entrypoint did not detect delayed Alexandria"
+fi
+
+if echo "$DELAYED_OUTPUT" | grep -q "Loaded dummy_key -> DELAYED_VAR"; then
+  pass "secret fetched after delayed start"
+else
+  fail "secret not fetched after delayed start"
+fi
+
+if echo "$DELAYED_OUTPUT" | grep -q "DELAYED_SUCCESS"; then
+  pass "command executed after delayed start"
+else
+  fail "command not executed after delayed start"
+fi
+
+# Clean up if still running
+if kill -0 "$DELAYED_PID" 2>/dev/null; then
+  kill "$DELAYED_PID" 2>/dev/null || true
+  wait "$DELAYED_PID" 2>/dev/null || true
 fi
 
 # =========================================================================
