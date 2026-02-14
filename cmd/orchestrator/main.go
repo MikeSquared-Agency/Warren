@@ -25,6 +25,7 @@ import (
 	"warren/internal/hermes"
 	"warren/internal/metrics"
 	"warren/internal/policy"
+	"warren/internal/process"
 	"warren/internal/proxy"
 	"warren/internal/services"
 )
@@ -124,6 +125,18 @@ func main() {
 				logger.Error("hermes publish failed", "subject", subject, "error", err)
 			}
 		})
+	}
+
+	// Process tracker for CC sessions.
+	procTracker := process.NewTracker()
+
+	// Subscribe to CC sidecar events if hermes is enabled.
+	if hermesClient != nil {
+		procSub := process.NewSubscriber(hermesClient, procTracker, emitter, logger)
+		if err := procSub.Start(); err != nil {
+			logger.Error("failed to start process subscriber", "error", err)
+			// Non-fatal: orchestrator can run without CC session tracking.
+		}
 	}
 
 	// Alexandria briefing client.
@@ -278,7 +291,7 @@ func main() {
 				IdleTimeout:   agent.Idle.Timeout.String(),
 			}
 		}
-		adminSrv = admin.NewServer(agentInfos, policyByName, policyCancels, registry, emitter, serviceMgr, p, cfg, *configPath, p.WSCounter().Total, hermesClient, logger)
+		adminSrv = admin.NewServer(agentInfos, policyByName, policyCancels, registry, emitter, serviceMgr, p, cfg, *configPath, p.WSCounter().Total, hermesClient, procTracker, logger)
 
 		// Mount metrics on admin handler.
 		adminMux := http.NewServeMux()

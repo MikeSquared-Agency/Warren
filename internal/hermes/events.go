@@ -101,3 +101,17 @@ type SSHDeniedData struct {
 	Reason      string `json:"reason"`
 	RemoteIP    string `json:"remote_ip,omitempty"`
 }
+
+// CCSessionCompletedData is the payload for Claude Code session completion events.
+type CCSessionCompletedData struct {
+	SessionID      string   `json:"session_id"`
+	TaskID         string   `json:"task_id,omitempty"`
+	OwnerUUID      string   `json:"owner_uuid,omitempty"`
+	AgentType      string   `json:"agent_type"`
+	TranscriptPath string   `json:"transcript_path"`
+	FilesChanged   []string `json:"files_changed"`
+	ExitCode       int      `json:"exit_code"`
+	DurationMs     int64    `json:"duration_ms"`
+	WorkingDir     string   `json:"working_dir"`
+	Timestamp      string   `json:"timestamp"`
+}

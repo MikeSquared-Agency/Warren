@@ -50,12 +50,27 @@ var StreamConfigs = []jetstream.StreamConfig{
 		Replicas:    1,
 		Discard:     jetstream.DiscardOld,
 	},
+	{
+		Name:        "CC_SESSIONS",
+		Description: "Claude Code session events from the CC sidecar",
+		Subjects:    []string{"swarm.cc.>"},
+		Retention:   jetstream.LimitsPolicy,
+		MaxAge:      7 * 24 * time.Hour, // 7 days
+		Storage:     jetstream.FileStorage,
+		Replicas:    1,
+		Discard:     jetstream.DiscardOld,
+	},
 }
 
 // KVBucketConfigs defines KeyValue buckets to provision.
 var KVBucketConfigs = []jetstream.KeyValueConfig{
 	{
 		Bucket:  "THREAD_OWNERSHIP",
+		TTL:     24 * time.Hour,
+		Storage: jetstream.MemoryStorage,
+	},
+	{
+		Bucket:  "CC_SESSION_REGISTRY",
 		TTL:     24 * time.Hour,
 		Storage: jetstream.MemoryStorage,
 	},
