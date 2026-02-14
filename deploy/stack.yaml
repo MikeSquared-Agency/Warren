@@ -221,6 +221,34 @@ services:
     - LISTEN_ADDR=:8750
     - AGENT_BOT_MAP={}
 
+  dredd:
+    image: dredd:latest
+    networks:
+    - agents
+    entrypoint: ["/vault-entrypoint.sh"]
+    command: ["dredd"]
+    volumes:
+    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+    environment:
+    - VAULT_AGENT_ID=dredd
+    - VAULT_SECRETS=supabase_db_url:DATABASE_URL,anthropic_api_key:ANTHROPIC_API_KEY,slack_bot_token:SLACK_BOT_TOKEN
+    - DREDD_PORT=8750
+    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+    - DREDD_MODEL=claude-sonnet-4-20250514
+    - SLACK_DECISIONS_CHANNEL=C0AF03ERS0N
+    - LOG_LEVEL=info
+
   # ──────────────────────────────────────────────
   # Agent Services (openclaw-friend, host-mode ports)
   # ──────────────────────────────────────────────
