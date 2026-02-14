@@ -56,6 +56,7 @@ func main() {
 	root.AddCommand(
 		agentCmd,
 		serviceCmd,
+		swarmCmd(),
 		statusCmd(),
 		reloadCmd(),
 		eventsCmd(),

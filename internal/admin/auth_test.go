@@ -41,6 +41,7 @@ func testServerWithToken(t *testing.T, token string) *Server {
 		registry, emitter, nil, p, cfg, tmpFile.Name(),
 		func() int64 { return 0 },
 		nil, // no hermes client in tests
+		nil, // no process tracker in tests
 		logger,
 	)
 }

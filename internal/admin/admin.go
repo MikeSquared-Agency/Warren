@@ -19,10 +19,11 @@ import (
 	"warren/internal/config"
 	"warren/internal/container"
 	"warren/internal/events"
+	"warren/internal/hermes"
 	"warren/internal/policy"
+	"warren/internal/process"
 	"warren/internal/proxy"
 	"warren/internal/services"
-	"warren/internal/hermes"
 )
 
 // AgentInfo describes a configured agent.
@@ -70,6 +71,7 @@ type Server struct {
 	startAt   time.Time
 	wsTotal   func() int64
 	hermes    *hermes.Client
+	procTracker *process.Tracker
 }
 
 // NewServer creates a new admin server.
@@ -85,6 +87,7 @@ func NewServer(
 	cfgPath string,
 	wsTotal func() int64,
 	hermes *hermes.Client,
+	procTracker *process.Tracker,
 	logger *slog.Logger,
 ) *Server {
 	l := logger.With("component", "admin")
@@ -92,20 +95,21 @@ func NewServer(
 		l.Warn("admin API has no auth token configured — all requests will be allowed")
 	}
 	return &Server{
-		agents:    agents,
-		policies:  policies,
-		cancels:   cancels,
-		registry:  registry,
-		events:    emitter,
-		manager:   manager,
-		prxy:      prxy,
-		cfg:       cfg,
-		cfgPath:   cfgPath,
-		authToken: cfg.AdminToken,
-		wsTotal:   wsTotal,
-		hermes:    hermes,
-		logger:    l,
-		startAt:   time.Now(),
+		agents:      agents,
+		policies:    policies,
+		cancels:     cancels,
+		registry:    registry,
+		events:      emitter,
+		manager:     manager,
+		prxy:        prxy,
+		cfg:         cfg,
+		cfgPath:     cfgPath,
+		authToken:   cfg.AdminToken,
+		wsTotal:     wsTotal,
+		hermes:      hermes,
+		procTracker: procTracker,
+		logger:      l,
+		startAt:     time.Now(),
 	}
 }
 
@@ -152,14 +156,20 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
 	type agentResp struct {
 		AgentInfo
+		Type        string `json:"type"`
 		State       string `json:"state"`
 		Connections int64  `json:"connections"`
+		Runtime     string `json:"runtime,omitempty"`
+		TaskID      string `json:"task_id,omitempty"`
+		SessionID   string `json:"session_id,omitempty"`
 	}
 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	result := make([]agentResp, 0, len(s.agents))
+
+	// Container-based agents.
 	for name, info := range s.agents {
 		state := "unknown"
 		if pol, ok := s.policies[name]; ok {
@@ -169,7 +179,21 @@ func (s *Server) listAgents(w http.ResponseWriter, _ *http.Request) {
 		if s.prxy != nil {
 			conns = s.prxy.WSCounter().Count(info.Hostname)
 		}
-		result = append(result, agentResp{AgentInfo: info, State: state, Connections: conns})
+		result = append(result, agentResp{AgentInfo: info, Type: "container", State: state, Connections: conns})
+	}
+
+	// Process-based agents (CC sessions).
+	if s.procTracker != nil {
+		for _, pa := range s.procTracker.List() {
+			result = append(result, agentResp{
+				AgentInfo: AgentInfo{Name: pa.Name},
+				Type:      pa.Type,
+				State:     pa.Status,
+				Runtime:   pa.Runtime,
+				TaskID:    pa.TaskID,
+				SessionID: pa.SessionID,
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

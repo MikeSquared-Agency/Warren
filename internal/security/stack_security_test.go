@@ -179,12 +179,16 @@ func TestStackPortExposure(t *testing.T) {
 	stack := loadStack(t)
 
 	// Only these services are allowed to publish ports to the host.
+	// Hermes (NATS) exposes 4222+8222 for host-side services (warren-server,
+	// cc-sidecar). Auth token required — Docker Swarm doesn't support
+	// localhost-only binding so the token is the access control layer.
 	allowed := map[string]bool{
 		"lily":         true,
 		"scout":        true,
 		"dutybound-mc": true,
 		"celebrimbor":  true,
 		"alexandria":   true,
+		"hermes":       true,
 	}
 
 	for svcName, svc := range stack.Services {

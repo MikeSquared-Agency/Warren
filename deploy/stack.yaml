@@ -25,6 +25,15 @@ services:
     image: nats:latest
     networks:
     - agents
+    ports:
+    - target: 4222
+      published: 4222
+      protocol: tcp
+      mode: host
+    - target: 8222
+      published: 8222
+      protocol: tcp
+      mode: host
     command:
     - --jetstream
     - --store_dir
