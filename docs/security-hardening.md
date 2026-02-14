@@ -39,10 +39,13 @@ This change hardens the Warren Docker Swarm stack by:
 
 Services that need secrets use `deploy/vault-entrypoint.sh` as their Docker entrypoint. The script:
 
-1. Waits for Alexandria to be reachable (retry loop with configurable timeout)
-2. Fetches each secret via `GET /api/v1/secrets/{name}` with `X-Agent-ID` header
-3. Exports the decrypted value as an environment variable
-4. Execs the original binary
+1. Waits for Alexandria to be reachable (**retries indefinitely** — never exits on timeout)
+2. Logs a "Still waiting" progress message every 30s so operators can see it's alive
+3. Fetches each secret via `GET /api/v1/secrets/{name}` with `X-Agent-ID` header
+4. Exports the decrypted value as an environment variable
+5. Execs the original binary
+
+**Resilience**: The entrypoint never gives up waiting for Alexandria. During `--force` service updates, Alexandria's host-mode port 8500 can be unavailable for 2-5 minutes (zombie container holds the port). The retry-forever approach avoids burning through Swarm's `max_attempts` restart limit during these transient outages. Once Alexandria recovers, dependent services connect and start normally.
 
 Configuration is via environment variables:
 
@@ -51,7 +54,7 @@ Configuration is via environment variables:
 | `VAULT_AGENT_ID` | Agent identity for access control | `dispatch` |
 | `VAULT_SECRETS` | Comma-separated `secret:ENV_VAR` mappings | `supabase_db_url:DATABASE_URL` |
 | `VAULT_URL` | Alexandria base URL (default: overlay) | `http://warren_alexandria:8500` |
-| `VAULT_TIMEOUT` | Max seconds to wait (default: 60) | `60` |
+| `VAULT_TIMEOUT` | Max seconds to wait (default: 60) | `60` (kept for backward compat, no longer triggers exit) |
 
 Works on both Alpine (wget) and Debian (curl) images.
 
@@ -105,7 +108,7 @@ Validates stack.yaml for: no plaintext secrets, correct port exposure, NATS auth
 bash tests/security/test_vault_entrypoint.sh
 ```
 
-Tests vault-entrypoint.sh: input validation, timeout behavior, secret parsing, multi-secret support, exec passthrough.
+Tests vault-entrypoint.sh: input validation, retry-forever behavior, delayed Alexandria start, secret parsing, multi-secret support, exec passthrough.
 
 ### E2E Tests (Live Stack)
 
@@ -114,6 +117,14 @@ bash tests/security/test_stack_security_e2e.sh
 ```
 
 Verifies against running Docker Swarm: ports closed, pg-proxy removed, vault seeded, service envs clean, services healthy, NATS auth enforced, Docker secrets mounted.
+
+### E2E Tests (Vault Resilience)
+
+```bash
+bash tests/security/test_vault_resilience_e2e.sh
+```
+
+Validates entrypoint survives Alexandria outages: scales Alexandria to 0, force-restarts Chronicle/Dispatch, verifies they wait (not crash-loop), restores Alexandria, verifies recovery. **Warning**: Temporarily takes Alexandria offline — run in staging only.
 
 ## Follow-up (Not in Scope)
 
