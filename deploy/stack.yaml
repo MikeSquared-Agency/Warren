@@ -170,6 +170,7 @@ services:
     - BATCH_FLUSH_THRESHOLD=100
     - LOG_LEVEL=info
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
+    - DEFAULT_OWNER_UUID=e621e1f8-c36c-495a-93fc-0c247a3e6e5f
 
   promptforge:
     image: promptforge:latest
