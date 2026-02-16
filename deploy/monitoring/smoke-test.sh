@@ -392,6 +392,8 @@ send_slack_alert() {
     hostname=$(hostname -f 2>/dev/null || hostname)
     local timestamp
     timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+    local alert_id
+    alert_id="smoke_$(date +%s)"
 
     local fail_lines=""
     for f in "${failures[@]}"; do
@@ -408,6 +410,7 @@ send_slack_alert() {
         summary+=", ${#degraded[@]} degraded"
     fi
 
+    # Build Block Kit blocks with action buttons per failed service.
     local blocks
     blocks=$(cat <<EOJSON
 [
@@ -415,7 +418,7 @@ send_slack_alert() {
         "type": "header",
         "text": {
             "type": "plain_text",
-            "text": "Warren Smoke Test Alert",
+            "text": "🚨 Warren Smoke Test Alert",
             "emoji": true
         }
     },
@@ -448,6 +451,56 @@ EOJSON
     }"
     fi
 
+    # Add action buttons for each failed service.
+    for f in "${failures[@]}"; do
+        # Extract service name: "ServiceName (reason)" → lowercase, no spaces
+        local svc_display="${f%% (*}"
+        local svc_name
+        svc_name=$(echo "$svc_display" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[()]//g')
+
+        blocks+=",
+    {
+        \"type\": \"divider\"
+    },
+    {
+        \"type\": \"section\",
+        \"text\": {
+            \"type\": \"mrkdwn\",
+            \"text\": \"*${svc_display}*\"
+        }
+    },
+    {
+        \"type\": \"actions\",
+        \"elements\": [
+            {
+                \"type\": \"button\",
+                \"text\": {\"type\": \"plain_text\", \"text\": \"🔄 Restart\", \"emoji\": true},
+                \"action_id\": \"smoke_restart:${svc_name}\",
+                \"value\": \"${svc_name}\",
+                \"style\": \"danger\",
+                \"confirm\": {
+                    \"title\": {\"type\": \"plain_text\", \"text\": \"Restart ${svc_display}?\"},
+                    \"text\": {\"type\": \"mrkdwn\", \"text\": \"This will force-restart the Docker service.\"},
+                    \"confirm\": {\"type\": \"plain_text\", \"text\": \"Restart\"},
+                    \"deny\": {\"type\": \"plain_text\", \"text\": \"Cancel\"}
+                }
+            },
+            {
+                \"type\": \"button\",
+                \"text\": {\"type\": \"plain_text\", \"text\": \"📋 Logs\", \"emoji\": true},
+                \"action_id\": \"smoke_logs:${svc_name}\",
+                \"value\": \"${svc_name}\"
+            },
+            {
+                \"type\": \"button\",
+                \"text\": {\"type\": \"plain_text\", \"text\": \"✅ Acknowledge\", \"emoji\": true},
+                \"action_id\": \"smoke_ack:${alert_id}\",
+                \"value\": \"${alert_id}\"
+            }
+        ]
+    }"
+    done
+
     blocks+="]"
 
     local payload
@@ -467,16 +520,49 @@ EOJSON
         -H "Content-Type: application/json; charset=utf-8" \
         -d "$payload" \
         "https://slack.com/api/chat.postMessage" 2>/dev/null) || {
-        echo "[WARN] Failed to send Slack alert"
+        echo "[WARN] Failed to send Block Kit alert, trying plain text fallback"
+        send_slack_alert_fallback "$summary" "$fail_lines" "$degraded_lines"
         return 0
     }
 
     if echo "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
-        echo "[INFO] Slack alert sent"
+        echo "[INFO] Slack alert sent (Block Kit with action buttons)"
     else
         local err
         err=$(echo "$resp" | jq -r '.error // "unknown"' 2>/dev/null)
-        echo "[WARN] Slack API error: $err"
+        echo "[WARN] Slack API error: $err — trying plain text fallback"
+        send_slack_alert_fallback "$summary" "$fail_lines" "$degraded_lines"
+    fi
+}
+
+# Plain text fallback if Block Kit fails.
+send_slack_alert_fallback() {
+    local summary="$1" fail_lines="$2" degraded_lines="$3"
+    local text="🚨 Warren Smoke Test Alert\n${summary}\n\nFailed:${fail_lines}"
+    if [[ -n "$degraded_lines" ]]; then
+        text+="\n\nDegraded:${degraded_lines}"
+    fi
+
+    local payload
+    payload=$(printf '{"channel":"%s","text":"%s"}' "$SLACK_CHANNEL" "$text")
+
+    local resp
+    resp=$(curl -sf --max-time 10 \
+        -X POST \
+        -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -d "$payload" \
+        "https://slack.com/api/chat.postMessage" 2>/dev/null) || {
+        echo "[WARN] Failed to send fallback Slack alert"
+        return 0
+    }
+
+    if echo "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
+        echo "[INFO] Slack fallback alert sent"
+    else
+        local err
+        err=$(echo "$resp" | jq -r '.error // "unknown"' 2>/dev/null)
+        echo "[WARN] Slack fallback API error: $err"
     fi
 }
 
