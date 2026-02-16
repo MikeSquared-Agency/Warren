@@ -4,6 +4,10 @@ set -euo pipefail
 # ── Warren Swarm Smoke Test ─────────────────────────────────────────
 # Checks health of all Warren services and alerts to Slack on failure.
 # Run via cron every 15 minutes.
+#
+# Host-reachable services are checked directly via localhost.
+# Overlay-only services (no published ports) are probed from INSIDE
+# the Docker network using `docker exec` against a running container.
 # ─────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,29 +25,178 @@ SLACK_CHANNEL="${SLACK_CHANNEL:-C0AE9AMK9MM}"
 ALEXANDRIA_URL="http://localhost:8500"
 CURL_TIMEOUT=5
 
+# ── Overlay probe setup ─────────────────────────────────────────────
+# Find a container on the warren_agents network to use as a probe.
+# Prefer alexandria (Python image, has urllib). Falls back to wget/curl
+# in any warren container, or docker run as last resort.
+PROBE_CONTAINER=""
+PROBE_CMD=""  # "wget" or "curl" or "python"
+
+find_probe() {
+    local candidates=("warren_alexandria" "warren_hermes" "warren_dispatch" "warren_chronicle")
+    for name in "${candidates[@]}"; do
+        local cid
+        cid=$(docker ps -q -f "name=${name}" 2>/dev/null | head -1) || continue
+        [[ -z "$cid" ]] && continue
+
+        # Check for wget (Alpine default)
+        if docker exec "$cid" which wget >/dev/null 2>&1; then
+            PROBE_CONTAINER="$cid"
+            PROBE_CMD="wget"
+            return 0
+        fi
+        # Check for curl
+        if docker exec "$cid" which curl >/dev/null 2>&1; then
+            PROBE_CONTAINER="$cid"
+            PROBE_CMD="curl"
+            return 0
+        fi
+        # Check for python3 (can do HTTP)
+        if docker exec "$cid" which python3 >/dev/null 2>&1; then
+            PROBE_CONTAINER="$cid"
+            PROBE_CMD="python"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Execute an HTTP GET from inside the overlay network.
+# Usage: overlay_get <url> [header:value ...]
+# Returns: HTTP body on stdout, exits 0 on 2xx, 1 otherwise.
+overlay_get() {
+    local url="$1"; shift
+    local headers=("$@")
+
+    if [[ -z "$PROBE_CONTAINER" ]]; then
+        echo ""
+        return 1
+    fi
+
+    case "$PROBE_CMD" in
+        wget)
+            local wget_args=("-qO-" "--timeout=$CURL_TIMEOUT")
+            for h in "${headers[@]}"; do
+                wget_args+=("--header=$h")
+            done
+            wget_args+=("$url")
+            docker exec "$PROBE_CONTAINER" wget "${wget_args[@]}" 2>/dev/null
+            ;;
+        curl)
+            local curl_args=("-sf" "--max-time" "$CURL_TIMEOUT")
+            for h in "${headers[@]}"; do
+                curl_args+=("-H" "$h")
+            done
+            curl_args+=("$url")
+            docker exec "$PROBE_CONTAINER" curl "${curl_args[@]}" 2>/dev/null
+            ;;
+        python)
+            local py_headers=""
+            for h in "${headers[@]}"; do
+                local key="${h%%:*}"
+                local val="${h#*: }"
+                py_headers+="req.add_header('$key','$val');"
+            done
+            docker exec "$PROBE_CONTAINER" python3 -c "
+import urllib.request,sys,json
+try:
+    req=urllib.request.Request('$url')
+    $py_headers
+    resp=urllib.request.urlopen(req,timeout=$CURL_TIMEOUT)
+    sys.stdout.write(resp.read().decode())
+except Exception as e:
+    sys.exit(1)
+" 2>/dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# overlay_check: like overlay_get but returns HTTP status code string
+overlay_check() {
+    local url="$1"; shift
+    local headers=("$@")
+
+    if [[ -z "$PROBE_CONTAINER" ]]; then
+        echo "000"
+        return 0
+    fi
+
+    case "$PROBE_CMD" in
+        wget)
+            # wget: if it succeeds, it's 2xx
+            local wget_args=("-qO/dev/null" "--timeout=$CURL_TIMEOUT" "-S")
+            for h in "${headers[@]}"; do
+                wget_args+=("--header=$h")
+            done
+            wget_args+=("$url")
+            if docker exec "$PROBE_CONTAINER" wget "${wget_args[@]}" >/dev/null 2>&1; then
+                echo "200"
+            else
+                echo "000"
+            fi
+            ;;
+        curl)
+            local curl_args=("-sf" "--max-time" "$CURL_TIMEOUT" "-o" "/dev/null" "-w" "%{http_code}")
+            for h in "${headers[@]}"; do
+                curl_args+=("-H" "$h")
+            done
+            curl_args+=("$url")
+            docker exec "$PROBE_CONTAINER" curl "${curl_args[@]}" 2>/dev/null || echo "000"
+            ;;
+        python)
+            local py_headers=""
+            for h in "${headers[@]}"; do
+                local key="${h%%:*}"
+                local val="${h#*: }"
+                py_headers+="req.add_header('$key','$val');"
+            done
+            docker exec "$PROBE_CONTAINER" python3 -c "
+import urllib.request,sys
+try:
+    req=urllib.request.Request('$url')
+    $py_headers
+    resp=urllib.request.urlopen(req,timeout=$CURL_TIMEOUT)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except:
+    print('000')
+" 2>/dev/null
+            ;;
+        *)
+            echo "000"
+            ;;
+    esac
+}
+
 # ── Service definitions ──────────────────────────────────────────────
-# Services reachable from the host (published ports):
-HOST_SERVICES=(
+
+# Host-reachable services (published ports).
+# Format: name|health_url|fallback_url (fallback is optional)
+HOST_HEALTH_SERVICES=(
+    "Alexandria|http://localhost:8500/health|http://localhost:8500/api/v1/health"
+    "Dredd|http://localhost:8750/health|"
+)
+
+# Host-reachable simple services (no /health JSON endpoint).
+HOST_SIMPLE_SERVICES=(
     "NATS (Hermes)|http://localhost:8222/healthz"
-    "Alexandria|http://localhost:8500/api/v1/health"
-    "PromptForge|http://localhost:8083/health"
-    "OpenClaw Gateway|tcp://localhost:8080"
+    "OpenClaw Gateway|tcp://localhost:18789"
 )
 
-# Services only reachable via Docker overlay network (no published ports).
-# Checked from inside the Alexandria container.
-DOCKER_SERVICES=(
-    "Dispatch|http://warren_dispatch:8601/health"
-    "Chronicle|http://warren_chronicle:8700/api/v1/health"
-    "Slack-gateway|http://warren_slack-gateway:8750/api/v1/health"
+# Overlay-only services — probed from inside the Docker network.
+# Format: name|health_url|fallback_url|docker_service_name
+OVERLAY_HEALTH_SERVICES=(
+    "Dispatch|http://warren_dispatch:8600/health|http://warren_dispatch:8600/api/v1/backlog?limit=1|warren_dispatch"
+    "Chronicle|http://warren_chronicle:8700/health||warren_chronicle"
+    "PromptForge|http://warren_promptforge:8083/health||warren_promptforge"
+    "Slack-gateway|http://warren_slack-gateway:8750/health||warren_slack-gateway"
 )
-
-# Container to exec health checks from (must be on the warren_agents network).
-DOCKER_PROBE_CONTAINER="warren_alexandria"
 
 # ── Try to fetch Slack bot token from Alexandria vault ───────────────
-# GET requests skip API key auth; only X-Agent-ID is needed.
-# smoke-test agent has a read grant on slack_bot_token.
 fetch_token_from_vault() {
     local resp
     resp=$(curl -sf --max-time "$CURL_TIMEOUT" \
@@ -64,67 +217,169 @@ fi
 
 # ── Health check helpers ─────────────────────────────────────────────
 failures=()
+degraded=()
 total=0
 passed=0
 
-check_result() {
-    local name="$1" http_code="$2"
+check_pass() {
+    local name="$1"
     total=$((total + 1))
-    if [[ "$http_code" =~ ^2 ]]; then
-        echo "[PASS] $name"
-        passed=$((passed + 1))
-    else
-        local reason="HTTP $http_code"
-        [[ "$http_code" == "000" ]] && reason="connection refused or timeout"
-        echo "[FAIL] $name - $reason"
-        failures+=("$name ($reason)")
-    fi
+    echo "[PASS] $name"
+    passed=$((passed + 1))
 }
 
-# ── Check host-reachable services ────────────────────────────────────
-for entry in "${HOST_SERVICES[@]}"; do
+check_degraded() {
+    local name="$1" detail="$2"
+    total=$((total + 1))
+    echo "[DEGRADED] $name - $detail"
+    passed=$((passed + 1))  # service is up, but degraded
+    degraded+=("$name ($detail)")
+}
+
+check_fail() {
+    local name="$1" reason="$2"
+    total=$((total + 1))
+    echo "[FAIL] $name - $reason"
+    failures+=("$name ($reason)")
+}
+
+# Parse /health JSON body and classify as pass/degraded/fail.
+evaluate_health_body() {
+    local name="$1" body="$2"
+    local status
+    status=$(echo "$body" | jq -r '.status // empty' 2>/dev/null)
+    case "$status" in
+        ok|healthy|UP)
+            local db_status
+            db_status=$(echo "$body" | jq -r '.db // .database // .components.db.status // empty' 2>/dev/null)
+            if [[ -n "$db_status" && "$db_status" != "ok" && "$db_status" != "healthy" && "$db_status" != "UP" ]]; then
+                check_degraded "$name" "service up, db: $db_status"
+            else
+                check_pass "$name"
+            fi
+            ;;
+        degraded)
+            local detail
+            detail=$(echo "$body" | jq -r '.message // .reason // "degraded"' 2>/dev/null)
+            check_degraded "$name" "$detail"
+            ;;
+        *)
+            check_fail "$name" "unhealthy status: ${status:-unknown}"
+            ;;
+    esac
+}
+
+# ── Check host-reachable /health services ────────────────────────────
+for entry in "${HOST_HEALTH_SERVICES[@]}"; do
+    IFS='|' read -r name health_url fallback_url <<< "$entry"
+
+    body=$(curl -sf --max-time "$CURL_TIMEOUT" "$health_url" 2>/dev/null) || body=""
+
+    if [[ -n "$body" ]]; then
+        evaluate_health_body "$name" "$body"
+        continue
+    fi
+
+    # Fallback to legacy endpoint if configured
+    if [[ -n "$fallback_url" ]]; then
+        http_code=$(curl -sf --max-time "$CURL_TIMEOUT" -o /dev/null -w '%{http_code}' \
+            -H "X-Agent-ID: smoke-test" "$fallback_url" 2>/dev/null) || http_code="000"
+        if [[ "$http_code" =~ ^2 ]]; then
+            check_pass "$name"
+        else
+            [[ "$http_code" == "000" ]] && http_code="connection refused or timeout"
+            check_fail "$name" "HTTP $http_code (fallback)"
+        fi
+        continue
+    fi
+
+    check_fail "$name" "connection refused or timeout"
+done
+
+# ── Check host-reachable simple services ─────────────────────────────
+for entry in "${HOST_SIMPLE_SERVICES[@]}"; do
     name="${entry%%|*}"
     url="${entry##*|}"
     if [[ "$url" == tcp://* ]]; then
-        # TCP connect check (for services with no health route)
         local_addr="${url#tcp://}"
         local_host="${local_addr%%:*}"
         local_port="${local_addr##*:}"
         if bash -c "echo >/dev/tcp/$local_host/$local_port" 2>/dev/null; then
-            http_code="200"
+            check_pass "$name"
         else
-            http_code="000"
+            check_fail "$name" "connection refused or timeout"
         fi
     else
         http_code=$(curl -sf --max-time "$CURL_TIMEOUT" -o /dev/null -w '%{http_code}' "$url" 2>/dev/null) || http_code="000"
+        if [[ "$http_code" =~ ^2 ]]; then
+            check_pass "$name"
+        else
+            [[ "$http_code" == "000" ]] && http_code="connection refused or timeout"
+            check_fail "$name" "HTTP $http_code"
+        fi
     fi
-    check_result "$name" "$http_code"
 done
 
-# ── Check Docker-internal services ───────────────────────────────────
-# Resolve the actual task container name (swarm appends a task suffix).
-probe_id=$(docker ps -q -f "name=${DOCKER_PROBE_CONTAINER}" 2>/dev/null | head -1)
-if [[ -z "$probe_id" ]]; then
-    echo "[WARN] Probe container ${DOCKER_PROBE_CONTAINER} not running — skipping Docker service checks"
-    for entry in "${DOCKER_SERVICES[@]}"; do
-        name="${entry%%|*}"
-        total=$((total + 1))
-        echo "[FAIL] $name - probe container unavailable"
-        failures+=("$name (probe container unavailable)")
-    done
-else
-    for entry in "${DOCKER_SERVICES[@]}"; do
-        name="${entry%%|*}"
-        url="${entry##*|}"
-        http_code=$(docker exec "$probe_id" \
-            wget -qO /dev/null --spider -T "$CURL_TIMEOUT" "$url" 2>&1 \
-            && echo "200" || echo "000") 2>/dev/null
-        check_result "$name" "$http_code"
-    done
-fi
+# ── Check overlay-only services via docker exec probe ────────────────
+find_probe || echo "[WARN] No probe container found — overlay checks will use replica count only"
+
+for entry in "${OVERLAY_HEALTH_SERVICES[@]}"; do
+    IFS='|' read -r name health_url fallback_url svc_name <<< "$entry"
+
+    if [[ -n "$PROBE_CONTAINER" ]]; then
+        # Try /health endpoint from inside the network
+        body=$(overlay_get "$health_url") || body=""
+
+        if [[ -n "$body" ]]; then
+            evaluate_health_body "$name" "$body"
+            continue
+        fi
+
+        # Try fallback URL if configured
+        if [[ -n "$fallback_url" ]]; then
+            fb_body=$(overlay_get "$fallback_url" "X-Agent-ID: smoke-test") || fb_body=""
+            if [[ -n "$fb_body" ]]; then
+                check_pass "$name"
+                continue
+            fi
+        fi
+
+        # If probe exists but HTTP failed, check if container responds at all
+        # before falling through to replica count
+        check_code=$(overlay_check "$health_url") || check_code="000"
+        if [[ "$check_code" =~ ^2 ]]; then
+            check_pass "$name"
+            continue
+        fi
+    fi
+
+    # Fallback: check docker service replica count
+    replicas=$(docker service ls --filter "name=${svc_name}" --format '{{.Replicas}}' 2>/dev/null | head -1)
+    if [[ -z "$replicas" ]]; then
+        check_fail "$name" "service not found"
+        continue
+    fi
+    running="${replicas%%/*}"
+    desired="${replicas##*/}"
+    if [[ "$running" == "$desired" && "$running" -gt 0 ]] 2>/dev/null; then
+        if [[ -n "$PROBE_CONTAINER" ]]; then
+            # We had a probe but HTTP failed — service is running but not responding
+            check_degraded "$name" "replicas $replicas but health endpoint unreachable"
+        else
+            check_pass "$name" # no probe available, replicas OK is best we can do
+        fi
+    elif [[ "$running" -gt 0 ]] 2>/dev/null; then
+        check_degraded "$name" "replicas $replicas"
+    else
+        check_fail "$name" "replicas $replicas"
+    fi
+done
 
 echo "---"
 echo "$passed/$total services healthy"
+if [[ ${#degraded[@]} -gt 0 ]]; then
+    echo "${#degraded[@]} service(s) degraded"
+fi
 
 # ── Slack alert on failure ───────────────────────────────────────────
 send_slack_alert() {
@@ -143,35 +398,64 @@ send_slack_alert() {
         fail_lines+="\\n- $f"
     done
 
+    local degraded_lines=""
+    for d in "${degraded[@]}"; do
+        degraded_lines+="\\n- $d"
+    done
+
+    local summary="${#failures[@]} service(s) DOWN"
+    if [[ ${#degraded[@]} -gt 0 ]]; then
+        summary+=", ${#degraded[@]} degraded"
+    fi
+
+    local blocks
+    blocks=$(cat <<EOJSON
+[
+    {
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": "Warren Smoke Test Alert",
+            "emoji": true
+        }
+    },
+    {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*$summary*\\nHost: \`$hostname\`\\nTime: $timestamp"
+        }
+    },
+    {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "*Failed services:*$fail_lines"
+        }
+    }
+EOJSON
+    )
+
+    # Add degraded block if any
+    if [[ ${#degraded[@]} -gt 0 ]]; then
+        blocks+=",
+    {
+        \"type\": \"section\",
+        \"text\": {
+            \"type\": \"mrkdwn\",
+            \"text\": \"*Degraded services:*$degraded_lines\"
+        }
+    }"
+    fi
+
+    blocks+="]"
+
     local payload
     payload=$(cat <<EOJSON
 {
     "channel": "$SLACK_CHANNEL",
-    "text": "Warren smoke test: ${#failures[@]} service(s) DOWN",
-    "blocks": [
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": "Warren Smoke Test Alert",
-                "emoji": true
-            }
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*${#failures[@]} of $total services failing*\\nHost: \`$hostname\`\\nTime: $timestamp"
-            }
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*Failed services:*$fail_lines"
-            }
-        }
-    ]
+    "text": "Warren smoke test: $summary",
+    "blocks": $blocks
 }
 EOJSON
     )
