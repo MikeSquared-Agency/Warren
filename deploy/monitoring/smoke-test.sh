@@ -35,7 +35,7 @@ HOST_SERVICES=(
 DOCKER_SERVICES=(
     "Dispatch|http://warren_dispatch:8601/health"
     "Chronicle|http://warren_chronicle:8700/api/v1/health"
-    "Slack-forwarder|http://warren_slack-forwarder:8800/api/v1/health"
+    "Slack-gateway|http://warren_slack-gateway:8750/api/v1/health"
 )
 
 # Container to exec health checks from (must be on the warren_agents network).
