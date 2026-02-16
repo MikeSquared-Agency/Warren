@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,7 +42,6 @@ type Spawner struct {
 	cfg     config.PicoClawConfig
 	logger  *slog.Logger
 	running int64 // atomic count of active workers
-	mu      sync.Mutex
 }
 
 // NewSpawner creates a new PicoClaw worker spawner.
