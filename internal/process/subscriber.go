@@ -1,6 +1,7 @@
 package process
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -8,23 +9,27 @@ import (
 
 	"warren/internal/events"
 	"warren/internal/hermes"
+	"warren/internal/store"
 )
 
 // Subscriber listens for CC sidecar events and updates the process tracker.
 type Subscriber struct {
-	hermes  *hermes.Client
-	tracker *Tracker
-	emitter *events.Emitter
-	logger  *slog.Logger
+	hermes     *hermes.Client
+	tracker    *Tracker
+	emitter    *events.Emitter
+	usageStore store.UsageStore // nil when usage tracking disabled
+	logger     *slog.Logger
 }
 
 // NewSubscriber creates a new CC session event subscriber.
-func NewSubscriber(h *hermes.Client, tracker *Tracker, emitter *events.Emitter, logger *slog.Logger) *Subscriber {
+// usageStore may be nil if usage tracking is disabled.
+func NewSubscriber(h *hermes.Client, tracker *Tracker, emitter *events.Emitter, usageStore store.UsageStore, logger *slog.Logger) *Subscriber {
 	return &Subscriber{
-		hermes:  h,
-		tracker: tracker,
-		emitter: emitter,
-		logger:  logger.With("component", "process-subscriber"),
+		hermes:     h,
+		tracker:    tracker,
+		emitter:    emitter,
+		usageStore: usageStore,
+		logger:     logger.With("component", "process-subscriber"),
 	}
 }
 
@@ -89,6 +94,8 @@ func (s *Subscriber) handleCompleted(ev hermes.Event) {
 			"session_id": data.SessionID,
 		},
 	})
+
+	s.enrichSession(data)
 }
 
 func (s *Subscriber) handleFailed(ev hermes.Event) {
@@ -134,4 +141,24 @@ func (s *Subscriber) handleFailed(ev hermes.Event) {
 			"session_id": data.SessionID,
 		},
 	})
+
+	s.enrichSession(data)
+}
+
+// enrichSession writes CC session metadata to the usage store.
+func (s *Subscriber) enrichSession(data hermes.CCSessionCompletedData) {
+	if s.usageStore == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	agentID := data.AgentType
+	if agentID == "" {
+		agentID = "unknown"
+	}
+
+	if err := s.usageStore.EnrichSession(ctx, data.SessionID, agentID, data.TaskID, data.DurationMs, data.ExitCode, data.FilesChanged); err != nil {
+		s.logger.Error("failed to enrich session usage", "session_id", data.SessionID, "error", err)
+	}
 }

@@ -28,6 +28,9 @@ import (
 	"warren/internal/process"
 	"warren/internal/proxy"
 	"warren/internal/services"
+	"warren/internal/store"
+	"warren/internal/tailer"
+	"warren/internal/usage"
 )
 
 func main() {
@@ -127,12 +130,34 @@ func main() {
 		})
 	}
 
+	// Usage store (Supabase/Postgres).
+	var usageStore store.UsageStore
+	if cfg.DatabaseURL != "" && cfg.Usage.Enabled {
+		pgStore, err := store.NewPostgresStore(ctx, cfg.DatabaseURL)
+		if err != nil {
+			logger.Error("failed to connect usage store", "error", err)
+			os.Exit(1)
+		}
+		defer pgStore.Close()
+		if err := store.EnsureSchema(ctx, pgStore.Pool()); err != nil {
+			logger.Error("failed to ensure usage schema", "error", err)
+			os.Exit(1)
+		}
+		usageStore = pgStore
+		logger.Info("usage store connected")
+
+		// Start JSONL tailer.
+		t := tailer.New(usageStore, cfg.Usage.JSONLPath, cfg.Usage.FlushInterval, cfg.Usage.PollInterval, logger)
+		go t.Run(ctx)
+		logger.Info("usage tailer started", "path", cfg.Usage.JSONLPath)
+	}
+
 	// Process tracker for CC sessions.
 	procTracker := process.NewTracker()
 
 	// Subscribe to CC sidecar events if hermes is enabled.
 	if hermesClient != nil {
-		procSub := process.NewSubscriber(hermesClient, procTracker, emitter, logger)
+		procSub := process.NewSubscriber(hermesClient, procTracker, emitter, usageStore, logger)
 		if err := procSub.Start(); err != nil {
 			logger.Error("failed to start process subscriber", "error", err)
 			// Non-fatal: orchestrator can run without CC session tracking.
@@ -307,6 +332,12 @@ func main() {
 		// Mount SSH handler (without auth, localhost-only protected)
 		adminMux.Handle("/ssh/", adminSrv.SSHHandler())
 		adminMux.HandleFunc("/api/services/", p.HandleServiceAPI)
+		// Mount usage API if store is available.
+		if usageStore != nil {
+			usageHandler := usage.NewHandler(usageStore)
+			usageHandler.Register(adminMux)
+			logger.Info("usage API mounted on admin mux")
+		}
 		adminMux.Handle("/", adminSrv.Handler())
 
 		go func() {

@@ -12,6 +12,7 @@ type Config struct {
 	AdminListen    string            `yaml:"admin_listen"` // e.g. ":9090", empty = disabled
 	AdminToken     string            `yaml:"admin_token"`  // bearer token for admin API auth
 	ProxyToken     string            `yaml:"proxy_token"`  // bearer token for proxy port auth
+	DatabaseURL    string            `yaml:"database_url"`
 	Defaults       Defaults          `yaml:"defaults"`
 	Agents         map[string]*Agent `yaml:"agents"`
 	Webhooks       []WebhookConfig   `yaml:"webhooks"`
@@ -19,7 +20,15 @@ type Config struct {
 	Hermes         HermesConfig      `yaml:"hermes"`
 	Alexandria     AlexandriaConfig  `yaml:"alexandria"`
 	SSH            SSHConfig         `yaml:"ssh"`
+Usage          UsageConfig       `yaml:"usage"`
 	PicoClaw       PicoClawConfig    `yaml:"picoclaw"`
+}
+
+type UsageConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	JSONLPath     string        `yaml:"jsonl_path"`
+	FlushInterval time.Duration `yaml:"flush_interval"`
+	PollInterval  time.Duration `yaml:"poll_interval"`
 }
 
 type PicoClawConfig struct {
@@ -129,6 +138,23 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Defaults.HealthCheckInterval == 0 {
 		cfg.Defaults.HealthCheckInterval = 30 * time.Second
+	}
+
+	// Database URL: env override takes precedence.
+	if envDB := os.Getenv("WARREN_DATABASE_URL"); envDB != "" {
+		cfg.DatabaseURL = envDB
+	}
+
+	// Usage tracking defaults.
+	if cfg.Usage.JSONLPath == "" {
+		home, _ := os.UserHomeDir()
+		cfg.Usage.JSONLPath = home + "/.openclaw/logs/anthropic-payload.jsonl"
+	}
+	if cfg.Usage.FlushInterval == 0 {
+		cfg.Usage.FlushInterval = 30 * time.Second
+	}
+	if cfg.Usage.PollInterval == 0 {
+		cfg.Usage.PollInterval = 5 * time.Second
 	}
 
 	if cfg.Hermes.URL == "" {
