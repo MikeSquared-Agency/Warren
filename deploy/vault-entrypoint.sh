@@ -61,11 +61,23 @@ for mapping in $VAULT_SECRETS; do
   secret_name=$(echo "$mapping" | cut -d: -f1)
   env_var=$(echo "$mapping" | cut -d: -f2)
 
-  value=$(http_get "$VAULT_URL/api/v1/secrets/$secret_name" "X-Agent-ID: $VAULT_AGENT_ID" \
-    | sed -n 's/.*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  value=""
+  retries=0
+  max_retries=10
+  while [ -z "$value" ] && [ "$retries" -lt "$max_retries" ]; do
+    value=$(http_get "$VAULT_URL/api/v1/secrets/$secret_name" "X-Agent-ID: $VAULT_AGENT_ID" \
+      | sed -n 's/.*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    if [ -z "$value" ]; then
+      retries=$((retries + 1))
+      if [ "$retries" -lt "$max_retries" ]; then
+        echo "[vault-entrypoint] Secret '$secret_name' not available yet, retrying ($retries/$max_retries)..."
+        sleep 2
+      fi
+    fi
+  done
 
   if [ -z "$value" ]; then
-    echo "[vault-entrypoint] ERROR: Failed to fetch secret '$secret_name'"
+    echo "[vault-entrypoint] ERROR: Failed to fetch secret '$secret_name' after $max_retries attempts"
     exit 1
   fi
 
