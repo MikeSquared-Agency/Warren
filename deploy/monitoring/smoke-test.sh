@@ -193,7 +193,7 @@ OVERLAY_HEALTH_SERVICES=(
     "Dispatch|http://warren_dispatch:8600/health|http://warren_dispatch:8600/api/v1/backlog?limit=1|warren_dispatch"
     "Chronicle|http://warren_chronicle:8700/health||warren_chronicle"
     "PromptForge|http://warren_promptforge:8083/health||warren_promptforge"
-    "Slack-gateway|http://warren_slack-gateway:8750/health||warren_slack-forwarder"
+    "Slack-gateway|http://warren_slack-gateway:8750/health||warren_slack-gateway"
 )
 
 # ── Try to fetch Slack bot token from Alexandria vault ───────────────
