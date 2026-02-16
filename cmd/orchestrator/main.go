@@ -137,6 +137,13 @@ func main() {
 			logger.Error("failed to start process subscriber", "error", err)
 			// Non-fatal: orchestrator can run without CC session tracking.
 		}
+
+		// Start PicoClaw worker spawner for picoclaw-runtime task assignments.
+		spawner := process.NewSpawner(hermesClient, procTracker, emitter, cfg.PicoClaw, logger)
+		if err := spawner.Start(); err != nil {
+			logger.Error("picoclaw spawner failed to start", "error", err)
+			// Non-fatal: orchestrator can run without picoclaw spawning.
+		}
 	}
 
 	// Alexandria briefing client.

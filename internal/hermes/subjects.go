@@ -33,12 +33,17 @@ const (
 	SubjectCCSessionCompleted = "swarm.cc.session.completed"
 	SubjectCCSessionFailed    = "swarm.cc.session.failed"
 
+	// Usage subjects.
+	SubjectUsageTokens = "swarm.usage.tokens"
+
 	// Wildcard patterns for subscriptions.
-	SubjectAllAgents = "swarm.agent.>"
-	SubjectAllTasks  = "swarm.task.>"
-	SubjectAllSystem = "swarm.system.>"
-	SubjectAllCC     = "swarm.cc.>"
-	SubjectAll       = "swarm.>"
+	SubjectAllUsage = "swarm.usage.>"
+	SubjectAllAgents       = "swarm.agent.>"
+	SubjectAllTasks        = "swarm.task.>"
+	SubjectAllTaskAssigned = "swarm.task.*.assigned"
+	SubjectAllSystem       = "swarm.system.>"
+	SubjectAllCC           = "swarm.cc.>"
+	SubjectAll             = "swarm.>"
 )
 
 // AgentSubject returns a subject for a specific agent event.

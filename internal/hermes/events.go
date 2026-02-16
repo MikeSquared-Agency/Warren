@@ -103,6 +103,8 @@ type SSHDeniedData struct {
 }
 
 // CCSessionCompletedData is the payload for Claude Code session completion events.
+// Extended fields (Model, Runtime, token counts) are emitted by PicoClaw workers
+// and are backwards-compatible — older producers simply omit them.
 type CCSessionCompletedData struct {
 	SessionID      string   `json:"session_id"`
 	TaskID         string   `json:"task_id,omitempty"`
@@ -114,4 +116,12 @@ type CCSessionCompletedData struct {
 	DurationMs     int64    `json:"duration_ms"`
 	WorkingDir     string   `json:"working_dir"`
 	Timestamp      string   `json:"timestamp"`
+	Model          string   `json:"model,omitempty"`
+	Runtime        string   `json:"runtime,omitempty"`
+	InputTokens    int64    `json:"input_tokens,omitempty"`
+	OutputTokens   int64    `json:"output_tokens,omitempty"`
+	CacheRead       int64  `json:"cache_read_tokens,omitempty"`
+	CacheWrite      int64  `json:"cache_write_tokens,omitempty"`
+	MissionID       string `json:"mission_id,omitempty"`
+	PromptVersionID string `json:"prompt_version_id,omitempty"`
 }
