@@ -19,25 +19,31 @@ import (
 // taskAssignment is the subset of the Dispatch Task struct we need for spawning.
 // The full struct is published on swarm.task.*.assigned.
 type taskAssignment struct {
-	ID               string `json:"task_id"`
-	Title            string `json:"title"`
-	Description      string `json:"description,omitempty"`
-	Runtime          string `json:"runtime,omitempty"`
-	RecommendedModel string `json:"recommended_model,omitempty"`
-	AssignedAgent    string `json:"assigned_agent,omitempty"`
+	ID               string   `json:"task_id"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description,omitempty"`
+	Runtime          string   `json:"runtime,omitempty"`
+	RecommendedModel string   `json:"recommended_model,omitempty"`
+	AssignedAgent    string   `json:"assigned_agent,omitempty"`
 	FilePatterns     []string `json:"file_patterns,omitempty"`
 }
 
 // Spawner subscribes to task assignment events and spawns PicoClaw workers
 // for tasks with runtime: "picoclaw".
+//
+// NOTE: This assumes picoclaw exposes a "worker" subcommand that accepts
+// --task, --mission-dir, --model, and --nats-url flags. Until picoclaw
+// implements this mode, the spawner will fail to find the subcommand.
+// The spawner publishes a fallback swarm.cc.session.completed event if
+// picoclaw doesn't publish one itself (e.g. older versions without NATS).
 type Spawner struct {
-	hermes     *hermes.Client
-	tracker    *Tracker
-	emitter    *events.Emitter
-	cfg        config.PicoClawConfig
-	logger     *slog.Logger
-	running    int64 // atomic count of active workers
-	mu         sync.Mutex
+	hermes  *hermes.Client
+	tracker *Tracker
+	emitter *events.Emitter
+	cfg     config.PicoClawConfig
+	logger  *slog.Logger
+	running int64 // atomic count of active workers
+	mu      sync.Mutex
 }
 
 // NewSpawner creates a new PicoClaw worker spawner.
@@ -107,13 +113,12 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 	// Create mission directory structure.
 	handoffsDir := filepath.Join(missionDir, ".mission", "handoffs")
 	findingsDir := filepath.Join(missionDir, ".mission", "findings")
-	if err := os.MkdirAll(handoffsDir, 0755); err != nil {
-		s.logger.Error("failed to create handoffs dir", "task_id", taskID, "error", err)
-		return
-	}
-	if err := os.MkdirAll(findingsDir, 0755); err != nil {
-		s.logger.Error("failed to create findings dir", "task_id", taskID, "error", err)
-		return
+	logsDir := filepath.Join(missionDir, ".mission", "logs")
+	for _, dir := range []string{handoffsDir, findingsDir, logsDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			s.logger.Error("failed to create mission dir", "task_id", taskID, "dir", dir, "error", err)
+			return
+		}
 	}
 
 	// Write briefing JSON.
@@ -156,11 +161,28 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 
 	cmd := exec.Command(s.cfg.Binary, args...)
 	cmd.Dir = missionDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Redirect stdout/stderr to per-task log files.
+	stdoutPath := filepath.Join(logsDir, "stdout.log")
+	stderrPath := filepath.Join(logsDir, "stderr.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		s.logger.Error("failed to create stdout log", "task_id", taskID, "error", err)
+		return
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		s.logger.Error("failed to create stderr log", "task_id", taskID, "error", err)
+		return
+	}
+	defer stderrFile.Close()
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
 
 	// Register in process tracker.
 	sessionID := fmt.Sprintf("picoclaw-%s", taskID)
+	startedAt := time.Now()
 	s.tracker.Register(&ProcessAgent{
 		Name:      "pc-" + truncateID(taskID, 8),
 		Type:      "process",
@@ -169,7 +191,7 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 		SessionID: sessionID,
 		WorkDir:   missionDir,
 		Status:    "running",
-		StartedAt: time.Now(),
+		StartedAt: startedAt,
 	})
 
 	s.emitter.Emit(events.Event{
@@ -186,6 +208,7 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 		s.logger.Error("failed to start picoclaw worker", "task_id", taskID, "error", err)
 		exitCode := 1
 		s.tracker.Update(sessionID, "failed", &exitCode)
+		s.publishCompletion(sessionID, taskID, missionDir, task.RecommendedModel, exitCode, startedAt)
 		return
 	}
 
@@ -195,10 +218,11 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 		done <- cmd.Wait()
 	}()
 
+	exitCode := 0
+	status := "done"
+
 	select {
 	case err := <-done:
-		exitCode := 0
-		status := "done"
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
@@ -214,7 +238,6 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 		} else {
 			s.logger.Info("picoclaw worker completed", "task_id", taskID)
 		}
-		s.tracker.Update(sessionID, status, &exitCode)
 
 	case <-time.After(s.cfg.DefaultTimeout):
 		s.logger.Warn("picoclaw worker timed out, killing",
@@ -222,8 +245,41 @@ func (s *Spawner) spawnWorker(task taskAssignment) {
 			"timeout", s.cfg.DefaultTimeout,
 		)
 		_ = cmd.Process.Kill()
-		exitCode := 137
-		s.tracker.Update(sessionID, "failed", &exitCode)
+		exitCode = 137
+		status = "failed"
+	}
+
+	s.tracker.Update(sessionID, status, &exitCode)
+	s.publishCompletion(sessionID, taskID, missionDir, task.RecommendedModel, exitCode, startedAt)
+}
+
+// publishCompletion publishes a fallback swarm.cc.session.completed event
+// so that NATS consumers see the completion even if picoclaw itself doesn't
+// publish one (e.g. older versions without native NATS support).
+func (s *Spawner) publishCompletion(sessionID, taskID, workDir, model string, exitCode int, startedAt time.Time) {
+	if s.hermes == nil {
+		return
+	}
+
+	durationMs := time.Since(startedAt).Milliseconds()
+	data := hermes.CCSessionCompletedData{
+		SessionID:  sessionID,
+		TaskID:     taskID,
+		AgentType:  "picoclaw",
+		ExitCode:   exitCode,
+		DurationMs: durationMs,
+		WorkingDir: workDir,
+		Timestamp:  time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		Model:      model,
+		Runtime:    "picoclaw",
+	}
+
+	subject := hermes.SubjectCCSessionCompleted
+	if exitCode != 0 {
+		subject = hermes.SubjectCCSessionFailed
+	}
+	if err := s.hermes.PublishEvent(subject, "picoclaw.worker.completed", data); err != nil {
+		s.logger.Error("failed to publish completion event", "session_id", sessionID, "error", err)
 	}
 }
 

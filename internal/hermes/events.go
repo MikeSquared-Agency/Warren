@@ -118,10 +118,10 @@ type CCSessionCompletedData struct {
 	Timestamp      string   `json:"timestamp"`
 	Model          string   `json:"model,omitempty"`
 	Runtime        string   `json:"runtime,omitempty"`
-	InputTokens    int64    `json:"input_tokens,omitempty"`
-	OutputTokens   int64    `json:"output_tokens,omitempty"`
-	CacheRead       int64  `json:"cache_read_tokens,omitempty"`
-	CacheWrite      int64  `json:"cache_write_tokens,omitempty"`
+	InputTokens      int64  `json:"input_tokens,omitempty"`
+	OutputTokens     int64  `json:"output_tokens,omitempty"`
+	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
 	MissionID       string `json:"mission_id,omitempty"`
 	PromptVersionID string `json:"prompt_version_id,omitempty"`
 }

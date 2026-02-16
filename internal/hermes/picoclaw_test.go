@@ -22,8 +22,8 @@ func TestCCSessionCompletedDataExtendedFields(t *testing.T) {
 		Runtime:      "picoclaw",
 		InputTokens:  5000,
 		OutputTokens: 2000,
-		CacheRead:    80000,
-		CacheWrite:   1000,
+		CacheReadTokens:    80000,
+		CacheWriteTokens:   1000,
 	}
 
 	raw, err := json.Marshal(data)
@@ -48,11 +48,11 @@ func TestCCSessionCompletedDataExtendedFields(t *testing.T) {
 	if got.OutputTokens != 2000 {
 		t.Errorf("output_tokens = %d, want 2000", got.OutputTokens)
 	}
-	if got.CacheRead != 80000 {
-		t.Errorf("cache_read_tokens = %d, want 80000", got.CacheRead)
+	if got.CacheReadTokens != 80000 {
+		t.Errorf("cache_read_tokens = %d, want 80000", got.CacheReadTokens)
 	}
-	if got.CacheWrite != 1000 {
-		t.Errorf("cache_write_tokens = %d, want 1000", got.CacheWrite)
+	if got.CacheWriteTokens != 1000 {
+		t.Errorf("cache_write_tokens = %d, want 1000", got.CacheWriteTokens)
 	}
 }
 
