@@ -20,7 +20,8 @@ type Config struct {
 	Hermes         HermesConfig      `yaml:"hermes"`
 	Alexandria     AlexandriaConfig  `yaml:"alexandria"`
 	SSH            SSHConfig         `yaml:"ssh"`
-	Usage          UsageConfig       `yaml:"usage"`
+Usage          UsageConfig       `yaml:"usage"`
+	PicoClaw       PicoClawConfig    `yaml:"picoclaw"`
 }
 
 type UsageConfig struct {
@@ -28,6 +29,13 @@ type UsageConfig struct {
 	JSONLPath     string        `yaml:"jsonl_path"`
 	FlushInterval time.Duration `yaml:"flush_interval"`
 	PollInterval  time.Duration `yaml:"poll_interval"`
+}
+
+type PicoClawConfig struct {
+	Binary         string        `yaml:"binary"`           // default: "picoclaw"
+	MissionBaseDir string        `yaml:"mission_base_dir"` // default: "/tmp/picoclaw-missions"
+	DefaultTimeout time.Duration `yaml:"default_timeout"`  // default: 5m
+	MaxConcurrent  int           `yaml:"max_concurrent"`   // default: 20
 }
 
 type AlexandriaConfig struct {
@@ -180,6 +188,20 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.SSH.AuthorizedKeysPath == "" {
 		cfg.SSH.AuthorizedKeysPath = "/home/{username}/.ssh/authorized_keys"
+	}
+
+	// PicoClaw defaults.
+	if cfg.PicoClaw.Binary == "" {
+		cfg.PicoClaw.Binary = "picoclaw"
+	}
+	if cfg.PicoClaw.MissionBaseDir == "" {
+		cfg.PicoClaw.MissionBaseDir = "/tmp/picoclaw-missions"
+	}
+	if cfg.PicoClaw.DefaultTimeout == 0 {
+		cfg.PicoClaw.DefaultTimeout = 5 * time.Minute
+	}
+	if cfg.PicoClaw.MaxConcurrent == 0 {
+		cfg.PicoClaw.MaxConcurrent = 20
 	}
 
 	for _, agent := range cfg.Agents {
