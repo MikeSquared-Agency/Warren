@@ -196,12 +196,12 @@ services:
     - PROMPT_FORGE_API_KEY=b01148d4ac474db310ae509fb3f59c1d7322cb9d94cc3288f011011b8fdf0a0d
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
 
-  slack-forwarder:
-    image: slack-forwarder:latest
+  slack-gateway:
+    image: slack-gateway:latest
     networks:
     - agents
     entrypoint: ["/vault-entrypoint.sh"]
-    command: ["slack-forwarder"]
+    command: ["slack-gateway"]
     volumes:
     - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
     deploy:
@@ -216,7 +216,7 @@ services:
           cpus: '0.5'
           memory: 256M
     environment:
-    - VAULT_AGENT_ID=slack-forwarder
+    - VAULT_AGENT_ID=slack-gateway
     - VAULT_SECRETS=slack_app_token:SLACK_APP_TOKEN,slack_bot_token:SLACK_BOT_TOKEN
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - LISTEN_ADDR=:8750
