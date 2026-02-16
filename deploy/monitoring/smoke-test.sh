@@ -27,7 +27,7 @@ CURL_TIMEOUT=5
 # Format: name|health_url|fallback_url (fallback is optional)
 HEALTH_SERVICES=(
     "Alexandria|http://localhost:8500/health|http://localhost:8500/api/v1/health"
-    "Dispatch|http://localhost:8600/health|"
+    "Dispatch|http://localhost:8600/health|http://localhost:8600/api/v1/backlog?limit=1"
     "Chronicle|http://localhost:8700/health|"
     "Dredd|http://localhost:8750/health|"
 )
@@ -124,7 +124,8 @@ for entry in "${HEALTH_SERVICES[@]}"; do
 
     # Fallback to legacy endpoint if configured
     if [[ -n "$fallback_url" ]]; then
-        http_code=$(curl -sf --max-time "$CURL_TIMEOUT" -o /dev/null -w '%{http_code}' "$fallback_url" 2>/dev/null) || http_code="000"
+        http_code=$(curl -sf --max-time "$CURL_TIMEOUT" -o /dev/null -w '%{http_code}' \
+            -H "X-Agent-ID: smoke-test" "$fallback_url" 2>/dev/null) || http_code="000"
         if [[ "$http_code" =~ ^2 ]]; then
             check_pass "$name"
         else
