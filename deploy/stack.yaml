@@ -265,11 +265,14 @@ services:
     - VAULT_SECRETS=supabase_db_url:DATABASE_URL,anthropic_api_key:ANTHROPIC_API_KEY,slack_bot_token:SLACK_BOT_TOKEN
     - DREDD_PORT=8750
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
-    - DREDD_MODEL=claude-sonnet-4-20250514
+    - DREDD_MODEL=claude-sonnet-4-6
     - SLACK_DECISIONS_CHANNEL=C0AF03ERS0N
     - LOG_LEVEL=info
 
+  # Agent Services (openclaw-friend, host-mode ports)
   # ──────────────────────────────────────────────
+
+  scout:
     image: openclaw-friend:latest
     networks:
     - agents
@@ -297,7 +300,7 @@ services:
     - SOUL_SLUG=scout
     - ALEXANDRIA_URL=http://warren_alexandria:8500
     - OPENCLAW_GATEWAY_PORT=18792
-    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
+    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-6
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - AGENT_ID=scout
     - NODE_ENV=production
@@ -333,7 +336,7 @@ services:
     environment:
     - OPENCLAW_GATEWAY_TOKEN=3a17a709d0e6cfcc212b921b2a0916d62a7b6f1d5fe5b8298d6b7995af428a1e
     - OPENCLAW_GATEWAY_PORT=18793
-    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
+    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-6
     - AGENT_ID=dutybound
     - SOUL_SLUG=dutybound
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
@@ -369,7 +372,7 @@ services:
           memory: 2G
     environment:
     - OPENCLAW_GATEWAY_TOKEN=0eeae1901c720a8b79e11a2d05dd6dd6cd4970b9a0471e30b0273fe65bea92e8
-    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-20250514
+    - OPENCLAW_MODEL=anthropic/claude-sonnet-4-6
     - ALEXANDRIA_URL=http://warren_alexandria:8500
     - AGENT_ID=celebrimbor
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
