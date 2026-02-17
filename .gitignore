@@ -1,2 +1,3 @@
 bin/
 orchestrator.yaml
+deploy/monitoring/.env
