@@ -114,6 +114,15 @@ services:
     image: dispatch:latest
     networks:
     - agents
+    ports:
+    - target: 8600
+      published: 8600
+      protocol: tcp
+      mode: host
+    - target: 8601
+      published: 8601
+      protocol: tcp
+      mode: host
     entrypoint: ["/vault-entrypoint.sh"]
     command: ["dispatch"]
     volumes:
@@ -176,6 +185,11 @@ services:
     image: promptforge:latest
     networks:
     - agents
+    ports:
+    - target: 8083
+      published: 8083
+      protocol: tcp
+      mode: host
     entrypoint: ["/vault-entrypoint.sh"]
     command: ["uvicorn", "prompt_forge.main:app", "--host", "0.0.0.0", "--port", "8083"]
     volumes:
@@ -221,6 +235,11 @@ services:
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - LISTEN_ADDR=:8750
     - AGENT_BOT_MAP={}
+    - DISPATCH_URL=http://warren_dispatch:8600
+    - DISPATCH_ADMIN_TOKEN=e25937ae02f5460abd9c9a55cbb5e9778cb396cf01306429e2579ecca273d065
+    - GATE_CHANNEL=C0AFQAXC5DX
+    - OPENCLAW_WEBHOOK_URL=http://172.17.0.1:18789
+    - OPENCLAW_WEBHOOK_TOKEN=8df9224907b40063e1d8b91b492b5cbc6f92ae756094a758f12e4adb711de957
 
   dredd:
     image: dredd:latest
