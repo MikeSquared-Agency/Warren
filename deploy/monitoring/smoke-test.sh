@@ -22,6 +22,8 @@ fi
 
 SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-}"
 SLACK_CHANNEL="${SLACK_CHANNEL:-C0AE9AMK9MM}"
+OPENCLAW_WEBHOOK_URL="${OPENCLAW_WEBHOOK_URL:-http://localhost:18789}"
+OPENCLAW_WEBHOOK_TOKEN="${OPENCLAW_WEBHOOK_TOKEN:-}"
 ALEXANDRIA_URL="http://localhost:8500"
 CURL_TIMEOUT=5
 
@@ -527,6 +529,13 @@ EOJSON
 
     if echo "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
         echo "[INFO] Slack alert sent (Block Kit with action buttons)"
+        # Wake Kai to diagnose and fix
+        if [[ -n "$OPENCLAW_WEBHOOK_TOKEN" ]]; then
+            local msg_ts
+            msg_ts=$(echo "$resp" | jq -r '.ts // empty' 2>/dev/null)
+            local wake_text="Smoke test failure: $summary [slack_ref:${SLACK_CHANNEL}:${msg_ts}]"
+            curl -sf --max-time 5                 -X POST                 -H "Authorization: Bearer $OPENCLAW_WEBHOOK_TOKEN"                 -H "Content-Type: application/json"                 -d "{\"text\":\"$wake_text\",\"mode\":\"now\"}"                 "${OPENCLAW_WEBHOOK_URL}/hooks/wake" >/dev/null 2>&1 &&                 echo "[INFO] OpenClaw webhook sent — Kai will investigate" ||                 echo "[WARN] Failed to send OpenClaw webhook"
+        fi
     else
         local err
         err=$(echo "$resp" | jq -r '.error // "unknown"' 2>/dev/null)
