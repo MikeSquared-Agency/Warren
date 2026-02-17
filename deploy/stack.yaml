@@ -1,26 +1,17 @@
 version: '3.8'
-
 networks:
   agents:
     driver: overlay
     driver_opts:
       encrypted: 'true'
-
 secrets:
   alexandria_database_url:
     external: true
   alexandria_encryption_key:
     external: true
-
 volumes:
-  hermes-data:
-
+  hermes-data: null
 services:
-
-  # ──────────────────────────────────────────────
-  # Core Infrastructure
-  # ──────────────────────────────────────────────
-
   hermes:
     image: nats:latest
     networks:
@@ -55,7 +46,6 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-
   alexandria:
     image: alexandria:latest
     networks:
@@ -68,12 +58,12 @@ services:
     secrets:
     - alexandria_database_url
     - alexandria_encryption_key
-    entrypoint: ["sh", "-c"]
+    entrypoint:
+    - sh
+    - -c
     command:
-    - >-
-      export DATABASE_URL="$$(cat /run/secrets/alexandria_database_url)" &&
-      export ENCRYPTION_KEY="$$(cat /run/secrets/alexandria_encryption_key)" &&
-      exec /alexandria
+    - export DATABASE_URL="$$(cat /run/secrets/alexandria_database_url)" && export
+      ENCRYPTION_KEY="$$(cat /run/secrets/alexandria_encryption_key)" && exec /alexandria
     environment:
     - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
     - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
@@ -85,12 +75,12 @@ services:
       restart_policy:
         condition: any
         delay: 5s
-        max_attempts: 5
+        max_attempts: 10
+        window: 300s
       resources:
         limits:
           cpus: '1.0'
           memory: 512M
-
   alexandria_embeddings:
     image: alexandria-embeddings:latest
     networks:
@@ -100,16 +90,12 @@ services:
       restart_policy:
         condition: any
         delay: 5s
-        max_attempts: 5
+        max_attempts: 10
+        window: 300s
       resources:
         limits:
           cpus: '1.0'
           memory: 1G
-
-  # ──────────────────────────────────────────────
-  # Internal Services (vault-entrypoint, no ports)
-  # ──────────────────────────────────────────────
-
   dispatch:
     image: dispatch:latest
     networks:
@@ -123,8 +109,10 @@ services:
       published: 8601
       protocol: tcp
       mode: host
-    entrypoint: ["/vault-entrypoint.sh"]
-    command: ["dispatch"]
+    entrypoint:
+    - /vault-entrypoint.sh
+    command:
+    - dispatch
     volumes:
     - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
     deploy:
@@ -151,13 +139,14 @@ services:
     - DISPATCH_ALEXANDRIA_URL=http://warren_alexandria:8500
     - DISPATCH_TICK_INTERVAL_MS=5000
     - DISPATCH_OWNER_FILTER_ENABLED=false
-
   chronicle:
     image: chronicle:latest
     networks:
     - agents
-    entrypoint: ["/vault-entrypoint.sh"]
-    command: ["chronicle"]
+    entrypoint:
+    - /vault-entrypoint.sh
+    command:
+    - chronicle
     volumes:
     - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
     deploy:
@@ -180,7 +169,6 @@ services:
     - LOG_LEVEL=info
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - DEFAULT_OWNER_UUID=e621e1f8-c36c-495a-93fc-0c247a3e6e5f
-
   promptforge:
     image: promptforge:latest
     networks:
@@ -190,8 +178,15 @@ services:
       published: 8083
       protocol: tcp
       mode: host
-    entrypoint: ["/vault-entrypoint.sh"]
-    command: ["uvicorn", "prompt_forge.main:app", "--host", "0.0.0.0", "--port", "8083"]
+    entrypoint:
+    - /vault-entrypoint.sh
+    command:
+    - uvicorn
+    - prompt_forge.main:app
+    - --host
+    - 0.0.0.0
+    - --port
+    - '8083'
     volumes:
     - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
     deploy:
@@ -199,7 +194,8 @@ services:
       restart_policy:
         condition: any
         delay: 5s
-        max_attempts: 5
+        max_attempts: 10
+        window: 300s
       resources:
         limits:
           cpus: '1.0'
@@ -209,13 +205,14 @@ services:
     - VAULT_SECRETS=supabase_url:SUPABASE_URL,supabase_service_role_key:SUPABASE_KEY,supabase_service_role_key:SUPABASE_SERVICE_ROLE_KEY
     - PROMPT_FORGE_API_KEY=b01148d4ac474db310ae509fb3f59c1d7322cb9d94cc3288f011011b8fdf0a0d
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
-
   slack-gateway:
     image: slack-gateway:latest
     networks:
     - agents
-    entrypoint: ["/vault-entrypoint.sh"]
-    command: ["slack-gateway"]
+    entrypoint:
+    - /vault-entrypoint.sh
+    command:
+    - slack-gateway
     volumes:
     - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
     deploy:
@@ -240,13 +237,14 @@ services:
     - GATE_CHANNEL=C0AFQAXC5DX
     - OPENCLAW_WEBHOOK_URL=http://172.17.0.1:18789
     - OPENCLAW_WEBHOOK_TOKEN=8df9224907b40063e1d8b91b492b5cbc6f92ae756094a758f12e4adb711de957
-
   dredd:
     image: dredd:latest
     networks:
     - agents
-    entrypoint: ["/vault-entrypoint.sh"]
-    command: ["dredd"]
+    entrypoint:
+    - /vault-entrypoint.sh
+    command:
+    - dredd
     volumes:
     - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
     deploy:
@@ -268,10 +266,6 @@ services:
     - DREDD_MODEL=claude-sonnet-4-6
     - SLACK_DECISIONS_CHANNEL=C0AF03ERS0N
     - LOG_LEVEL=info
-
-  # Agent Services (openclaw-friend, host-mode ports)
-  # ──────────────────────────────────────────────
-
   scout:
     image: openclaw-friend:latest
     networks:
@@ -310,7 +304,6 @@ services:
     command:
     - /bin/sh
     - /home/node/.openclaw/pull-soul-entrypoint.sh
-
   dutybound-mc:
     image: openclaw-friend:latest
     networks:
@@ -350,7 +343,6 @@ services:
     command:
     - /bin/sh
     - /home/node/.openclaw/pull-soul-entrypoint.sh
-
   celebrimbor:
     image: openclaw-friend:latest
     networks:
@@ -364,7 +356,7 @@ services:
       restart_policy:
         condition: any
         delay: 5s
-        max_attempts: 5
+        max_attempts: 10
         window: 120s
       resources:
         limits:
