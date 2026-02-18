@@ -180,7 +180,7 @@ except:
 # Format: name|health_url|fallback_url (fallback is optional)
 HOST_HEALTH_SERVICES=(
     "Alexandria|http://localhost:8500/health|http://localhost:8500/api/v1/health"
-    "Dredd|http://localhost:8750/health|"
+
 )
 
 # Host-reachable simple services (no /health JSON endpoint).
@@ -195,6 +195,7 @@ OVERLAY_HEALTH_SERVICES=(
     "Dispatch|http://warren_dispatch:8600/health|http://warren_dispatch:8600/api/v1/backlog?limit=1|warren_dispatch"
     "Chronicle|http://warren_chronicle:8700/health||warren_chronicle"
     "PromptForge|http://warren_promptforge:8083/health||warren_promptforge"
+    "Dredd|http://warren_dredd:8750/health||warren_dredd"
     "Slack-gateway|http://warren_slack-gateway:8750/health||warren_slack-gateway"
 )
 
