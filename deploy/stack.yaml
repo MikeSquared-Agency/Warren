@@ -62,8 +62,8 @@ services:
     - sh
     - -c
     command:
-    - export DATABASE_URL="$$(cat /run/secrets/alexandria_database_url)" && export
-      ENCRYPTION_KEY="$$(cat /run/secrets/alexandria_encryption_key)" && exec /alexandria
+    - export DATABASE_URL="$$(cat /run/secrets/alexandria_database_url)" && export ENCRYPTION_KEY="$$(cat /run/secrets/alexandria_encryption_key)"
+      && exec /alexandria
     environment:
     - SUPABASE_URL=https://uaubofpmokvumbqpeymz.supabase.co
     - SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdWJvZnBtb2t2dW1icXBleW16Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDg0OTMyNywiZXhwIjoyMDg2NDI1MzI3fQ.vpS4LvCi80RZlfxZStGKL8Oti-0qo33eoC5-7RA-YAk
@@ -135,7 +135,6 @@ services:
     - DISPATCH_HERMES_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - DISPATCH_WARREN_URL=http://192.168.1.218:9090
     - DISPATCH_WARREN_TOKEN=c1efd0a470ad5567a653d5d587c53f6c43e52c1419a5dc2c2ecfbbd5c040b276
-    - DISPATCH_FORGE_URL=http://warren_promptforge:8083
     - DISPATCH_ALEXANDRIA_URL=http://warren_alexandria:8500
     - DISPATCH_TICK_INTERVAL_MS=5000
     - DISPATCH_OWNER_FILTER_ENABLED=false
@@ -169,42 +168,6 @@ services:
     - LOG_LEVEL=info
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
     - DEFAULT_OWNER_UUID=e621e1f8-c36c-495a-93fc-0c247a3e6e5f
-  promptforge:
-    image: promptforge:latest
-    networks:
-    - agents
-    ports:
-    - target: 8083
-      published: 8083
-      protocol: tcp
-      mode: host
-    entrypoint:
-    - /vault-entrypoint.sh
-    command:
-    - uvicorn
-    - prompt_forge.main:app
-    - --host
-    - 0.0.0.0
-    - --port
-    - '8083'
-    volumes:
-    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 10
-        window: 300s
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-    environment:
-    - VAULT_AGENT_ID=promptforge
-    - VAULT_SECRETS=supabase_url:SUPABASE_URL,supabase_service_role_key:SUPABASE_KEY,supabase_service_role_key:SUPABASE_SERVICE_ROLE_KEY
-    - PROMPT_FORGE_API_KEY=b01148d4ac474db310ae509fb3f59c1d7322cb9d94cc3288f011011b8fdf0a0d
-    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
   slack-gateway:
     image: slack-gateway:latest
     networks:
@@ -237,35 +200,6 @@ services:
     - GATE_CHANNEL=C0AFQAXC5DX
     - OPENCLAW_WEBHOOK_URL=http://172.17.0.1:18789
     - OPENCLAW_WEBHOOK_TOKEN=8df9224907b40063e1d8b91b492b5cbc6f92ae756094a758f12e4adb711de957
-  dredd:
-    image: dredd:latest
-    networks:
-    - agents
-    entrypoint:
-    - /vault-entrypoint.sh
-    command:
-    - dredd
-    volumes:
-    - /home/mike/Warren/deploy/vault-entrypoint.sh:/vault-entrypoint.sh:ro
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-        delay: 5s
-        max_attempts: 10
-        window: 120s
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-    environment:
-    - VAULT_AGENT_ID=dredd
-    - VAULT_SECRETS=supabase_db_url:DATABASE_URL,anthropic_api_key:ANTHROPIC_API_KEY,slack_bot_token:SLACK_BOT_TOKEN
-    - DREDD_PORT=8750
-    - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
-    - DREDD_MODEL=claude-sonnet-4-6
-    - SLACK_DECISIONS_CHANNEL=C0AF03ERS0N
-    - LOG_LEVEL=info
   scout:
     image: openclaw-friend:latest
     networks:
@@ -290,7 +224,6 @@ services:
           memory: 512M
     environment:
     - OPENCLAW_GATEWAY_TOKEN=44a804c037a062c23d647745ccf3c1884fd8067c36e014be9f50c35d68d91636
-    - FORGE_URL=http://warren_promptforge:8083
     - SOUL_SLUG=scout
     - ALEXANDRIA_URL=http://warren_alexandria:8500
     - OPENCLAW_GATEWAY_PORT=18792
@@ -333,7 +266,6 @@ services:
     - AGENT_ID=dutybound
     - SOUL_SLUG=dutybound
     - NATS_URL=nats://58d522c6250fc6deabd33ab3a32de31da37e2d4c752ffd7138cce9bd9aa0535f@warren_hermes:4222
-    - FORGE_URL=http://warren_promptforge:8083
     - NODE_ENV=production
     volumes:
     - /home/mike/dutybound-data/openclaw.json:/home/node/.openclaw/openclaw.json
